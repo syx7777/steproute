@@ -1,0 +1,57 @@
+# 模型池：能力档(fast/balanced/strong) → 具体模型与运行时画像
+#
+# ┌─ 换成 vLLM 本地部署 ────────────────────────────────────────────────┐
+# │ 把下面每个模型的 endpoint 改成本地 OpenAI 兼容地址即可，例如：        │
+# │   endpoint: http://127.0.0.1:8000/v1                                │
+# │   model: Qwen2.5-1.5B-Instruct   # fast                              │
+# │   model: Qwen2.5-7B-Instruct     # balanced                          │
+# │   model: Qwen2.5-32B-Instruct    # strong                            │
+# │ 路由（Jev）与调度（Scheduler）代码无需任何改动。                      │
+# └─────────────────────────────────────────────────────────────────────┘
+#
+# 价格单位：美元 / 百万 token；延迟画像用于调度器的成本-延迟估算。
+models:
+  - id: flash-fast
+    tier: fast
+    model: deepseek-flash
+    reasoning_effort: low
+    max_tokens: 2048
+    temperature: 0.2
+    price_prompt_per_m: 0.14
+    price_completion_per_m: 0.28
+    max_concurrency: 8
+    base_latency_s: 0.9
+    latency_per_1k_prompt_s: 0.012
+    latency_per_1k_completion_s: 0.05
+    capability: 0.45
+    supports_cache: true
+
+  - id: flash-balanced
+    tier: balanced
+    model: deepseek-flash
+    reasoning_effort: high
+    max_tokens: 4096
+    temperature: 0.2
+    price_prompt_per_m: 0.14
+    price_completion_per_m: 0.28
+    max_concurrency: 6
+    base_latency_s: 1.4
+    latency_per_1k_prompt_s: 0.015
+    latency_per_1k_completion_s: 0.07
+    capability: 0.72
+    supports_cache: true
+
+  - id: pro-strong
+    tier: strong
+    model: deepseek-v4-pro
+    reasoning_effort: high
+    max_tokens: 6144
+    temperature: 0.2
+    price_prompt_per_m: 0.55
+    price_completion_per_m: 2.19
+    max_concurrency: 3
+    base_latency_s: 2.6
+    latency_per_1k_prompt_s: 0.02
+    latency_per_1k_completion_s: 0.09
+    capability: 0.93
+    supports_cache: true

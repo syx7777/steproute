@@ -1,0 +1,29 @@
+# ---- 密钥 / 敏感信息（绝不入库）----
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
+.secrets/
+# 本地加密密钥库（默认位置）
+steproute_secrets.json.enc
+*.enc
+
+# ---- 运行时产物 ----
+artifacts/
+data/runs/
+*.jsonl
+!tests/**/*.jsonl
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.idea/
+.vscode/

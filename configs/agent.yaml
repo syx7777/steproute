@@ -1,0 +1,7 @@
+# Agent 行为配置
+max_steps: 14
+history_window: 6
+max_doc_chars: 4000
+max_tool_chars: 3000
+retrieval_top_k: 5
+force_synthesis_after: 8

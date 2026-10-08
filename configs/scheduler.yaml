@@ -1,0 +1,20 @@
+# Runtime Scheduler：在满足能力下限的候选模型里选"运行时最合适"的那个
+#
+#   score = w_latency·latency + w_cost·cost + w_queue·queue − w_cache·cache_hit
+#
+w_latency: 1.0
+w_cost: 0.35
+w_queue: 0.60
+w_cache: 0.55
+
+# 命中前缀缓存可抵扣的等效延迟（秒）
+cache_bonus_s: 0.9
+# 每个在途请求（GPU 队列）的等效延迟惩罚（秒）
+queue_penalty_s: 0.7
+# 成本量纲缩放（把美元折算成与秒可比的量）
+cost_scale: 1.0
+
+# 是否允许选择比 Jev 下限更强的档（由打分解决定）
+allow_stronger: true
+# 只有确实需要 strong 时才允许 strong 进入候选，避免无谓升级
+freeze_strong_unless_required: true
