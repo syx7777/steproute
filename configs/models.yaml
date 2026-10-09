@@ -13,7 +13,7 @@
 models:
   - id: flash-fast
     tier: fast
-    model: deepseek-flash
+    model: deepseek-v4-flash
     reasoning_effort: low
     max_tokens: 2048
     temperature: 0.2
@@ -28,7 +28,7 @@ models:
 
   - id: flash-balanced
     tier: balanced
-    model: deepseek-flash
+    model: deepseek-v4.1-flash
     reasoning_effort: high
     max_tokens: 4096
     temperature: 0.2
@@ -43,7 +43,7 @@ models:
 
   - id: pro-strong
     tier: strong
-    model: deepseek-v4-pro
+    model: deepseek-v4.1-flash
     reasoning_effort: high
     max_tokens: 6144
     temperature: 0.2

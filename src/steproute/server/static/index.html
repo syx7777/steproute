@@ -90,6 +90,7 @@
   .todo-meta { font-size: 12px; color: var(--text-3); }
   .tag { font-size: 11px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; color: var(--text-3); white-space: nowrap; }
   .tag.manual { color: var(--brand-dark); border-color: var(--brand); background: var(--brand-soft); }
+  .tag.llm { color: var(--text-2); border-style: dashed; }
   input[type=checkbox] { width: 16px; height: 16px; margin-top: 3px; accent-color: var(--brand); flex: none; }
   .add-form { display: flex; gap: 8px; margin-bottom: 6px; }
   .add-form input { flex: 1; min-width: 120px; }
@@ -120,7 +121,6 @@
   </div>
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="workbench" aria-selected="true">工作台</button>
-    <button role="tab" data-tab="minutes" aria-selected="false">组会纪要</button>
     <button role="tab" data-tab="weekly" aria-selected="false">周报</button>
   </nav>
 </header>
@@ -160,7 +160,7 @@
           <button class="primary" id="todoSummarize">用 LLM 归纳待办</button>
           <span class="hint">归纳会用模型合并重复项、去掉碎片（显示上限 10 条，手动待办不受限）。文档待办只取本周更新过的文档。</span>
         </div>
-        <div class="hint" style="margin-bottom:6px">手动待办在前，文档待办按日期倒序；最多展示 10 条。全部可勾选 / 编辑 / 删除。</div>
+        <div class="hint" style="margin-bottom:6px">归纳成功后，清单展示模型整理的「归纳」项（只读）；手动待办仍可勾选 / 编辑 / 删除。未归纳时按文档待办展示。</div>
         <ul class="todos" id="todoList"></ul>
         <div class="row" style="margin-top:8px">
           <button class="ghost" id="candidateToggle" hidden>全部候选（0 条）</button>
@@ -176,39 +176,22 @@
     </div>
   </section>
 
-  <!-- ============ 组会纪要 ============ -->
-  <section class="panel" id="panel-minutes" hidden>
-    <div class="grid">
-      <div class="card col-7">
-        <h2>粘贴组会纪要</h2>
-        <div class="field">
-          <label>正文（支持 Markdown；「结论 / 决定」会抽成决策，「下一步 / 待办」会抽成待办）</label>
-          <textarea id="minText" placeholder="# 组会纪要&#10;&#10;- 结论：本轮对比不公平，需先对齐配置。&#10;- 下一步：统一抽帧数后重跑一轮。"></textarea>
-        </div>
-        <div class="row">
-          <input type="text" id="minTitle" placeholder="标题（可选）" />
-          <input type="text" id="minAuthor" placeholder="作者（可选）" />
-          <button class="primary" id="minSubmit">解析并导入</button>
-        </div>
-      </div>
-      <div class="card col-5">
-        <h2>抽取结果</h2>
-        <div id="minResult" class="empty">导入后会显示识别出的决策与待办。</div>
-      </div>
-    </div>
-  </section>
-
   <!-- ============ 周报 ============ -->
   <section class="panel" id="panel-weekly" hidden>
     <div class="card">
-      <h2>周报 <span class="count" id="weekTitle">—</span></h2>
+      <h2>周报 <span class="count" id="weekTitle">—</span> <span class="hint" id="weekScope"></span></h2>
       <div class="row" style="margin-bottom:12px">
         <span class="hint">写入知识库（固定）</span>
         <span class="chip" id="weeklySpace">—</span>
         <div class="spacer"></div>
+        <button class="primary" id="weeklyGenerate">用 LLM 生成周报</button>
         <button id="weeklyReload">刷新预览</button>
-        <button class="primary" id="weeklyPublish">发布到飞书</button>
+        <button id="weeklyPublish">发布到飞书</button>
       </div>
+      <div class="hint" style="margin-bottom:8px">
+        周报素材 = **工作台所选知识库**中**本周更新**的文档正文；点「用 LLM 生成周报」让模型归纳成简明周报（未配置 LLM 时回退规则）。发布时按飞书模板文档的 `##` 小节套用骨架。
+      </div>
+      <div class="hint" id="weekNote" style="margin-bottom:8px"></div>
       <div class="md" id="weekly">加载中…</div>
     </div>
   </section>
@@ -228,6 +211,7 @@ const setStatus = (text, isError) => {
 };
 const esc = (value) => String(value ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const currentSpace = () => $("kbSelect").value || "";
+const kbName = (id) => (KB_LIST.find((kb) => kb.space_id === id) || {}).name || id || "";
 const todoUrl = (scope, id) => `/api/todos/${scope}/${encodeURIComponent(id)}`;
 
 /** 极简 Markdown 渲染 */
@@ -284,13 +268,19 @@ function renderTodos(payload) {
   } else {
     $("todoList").innerHTML = TODOS.map((todo) => {
       const done = todo.status === "done";
-      const scope = todo.source === "manual" ? "manual" : "corpus";
+      const source = todo.source || "corpus";
+      const scope = source === "manual" ? "manual" : "corpus";
       const meta = [todo.owner ? `负责人：${esc(todo.owner)}` : "", todo.due ? `截止：${esc(todo.due)}` : "",
-        scope === "corpus" ? `来自 ${esc(todo.doc_id)}` : ""].filter(Boolean).join(" · ");
+        source === "corpus" ? `来自 ${esc(todo.doc_id)}` : ""].filter(Boolean).join(" · ");
+      const textHtml = `<span class="todo-text">${esc(todo.text)}${meta ? `<div class="todo-meta">${meta}</div>` : ""}</span>`;
+      // LLM 归纳项是只读的（无 id / 不可勾选改删）：勾选与编辑只对手动 / 文档待办生效。
+      if (source === "llm") {
+        return `<li data-id="${esc(todo.id)}" data-scope="llm">${textHtml}<span class="tag llm">归纳</span></li>`;
+      }
       return `<li class="${done ? "done" : ""}" data-id="${esc(todo.id)}" data-scope="${scope}">
         <input type="checkbox" data-act="toggle" data-id="${esc(todo.id)}" data-scope="${scope}" ${done ? "checked" : ""} />
-        <span class="todo-text">${esc(todo.text)}${meta ? `<div class="todo-meta">${meta}</div>` : ""}</span>
-        <span class="tag ${scope === "manual" ? "manual" : ""}">${scope === "manual" ? "手动" : "文档"}</span>
+        ${textHtml}
+        <span class="tag ${source === "manual" ? "manual" : ""}">${source === "manual" ? "手动" : "文档"}</span>
         <button class="ghost" data-act="edit" data-id="${esc(todo.id)}" data-scope="${scope}">编辑</button>
         <button class="ghost danger" data-act="delete" data-id="${esc(todo.id)}" data-scope="${scope}">删除</button>
       </li>`;
@@ -306,7 +296,8 @@ function renderCandidateNote() {
   // LLM 模式直读本周文档正文：素材是「文档篇数」，不是正则候选条数（候选可能为 0）。
   if (method === "llm") {
     const docs = SUMMARY.docs || 0;
-    note.innerHTML = `本周 ${docs} 篇文档 · 已归纳为 ${TODOS.length} 条待办 ` +
+    const count = (SUMMARY.todos || []).length;
+    note.innerHTML = `本周 ${docs} 篇文档 · 已归纳为 ${count} 条待办 ` +
       `<span class="tag manual">· 已用 LLM 归纳</span>`;
     note.hidden = false;
     return;
@@ -368,13 +359,28 @@ function renderKnowledgeBases(list, weeklySpaceId) {
   $("weeklySpace").textContent = weeklySpaceId || "—";
 }
 
+function renderWeekly(weekly) {
+  if (!weekly) return;
+  if (weekly.label) { $("weekChip").textContent = weekly.label.title; $("weekTitle").textContent = weekly.label.title; }
+  const scope = currentSpace() ? `汇总范围：${esc(kbName(currentSpace()))}` : "汇总范围：全部知识库";
+  $("weekScope").textContent = `· ${scope}`;
+  $("weekly").innerHTML = mdToHtml(weekly.markdown);
+  const method = weekly.method || "";
+  if (method === "llm") {
+    $("weekNote").innerHTML = `本周 ${weekly.docs ?? 0} 篇文档 · 已用 LLM 归纳 <span class="tag manual">LLM</span>`;
+  } else {
+    const reason = method === "none" ? (weekly.note || "本周该知识库没有更新的文档") : (weekly.note || "未生成");
+    $("weekNote").textContent = `${reason}（点「用 LLM 生成周报」）`;
+  }
+}
+
 function renderDashboard(data) {
   SUMMARY = data.summary || null;
   if (Array.isArray(data.candidate_todos)) CANDIDATES = data.candidate_todos;
   $("brief").innerHTML = mdToHtml(data.brief.markdown);
   renderTodos({ todos: data.todos, stats: data.todo_stats, candidate_todos: CANDIDATES });
   renderMemory(data.memory);
-  if (data.weekly) { $("weekChip").textContent = data.weekly.label.title; $("weekTitle").textContent = data.weekly.label.title; $("weekly").innerHTML = mdToHtml(data.weekly.markdown); }
+  renderWeekly(data.weekly);
   renderKnowledgeBases(data.knowledge_bases, data.weekly_space_id);
   if (!$("day").value) $("day").value = data.date;
 }
@@ -557,40 +563,39 @@ function startEdit(todoId, scope) {
   row.querySelector(".edit-input").focus();
 }
 
-$("minSubmit").addEventListener("click", async () => {
-  const text = $("minText").value.trim();
-  if (!text) { setStatus("请先粘贴纪要内容", true); return; }
-  setStatus("解析中…");
+$("weeklyGenerate").addEventListener("click", async () => {
+  $("weeklyGenerate").disabled = true;
+  setStatus("正在用模型归纳周报…");
   try {
-    const result = await send("/api/minutes", {
-      text, title: $("minTitle").value, author: $("minAuthor").value, date: $("day").value,
-    });
-    $("minResult").innerHTML =
-      `<div class="hint">已导入 <code>${esc(result.doc_id)}</code>（${esc(result.day)}）</div>
-       <h3 style="font-size:12px;margin:12px 0 4px">决策 ${result.decisions.length} 条</h3>
-       <ul class="list">${result.decisions.map((d) => `<li>${esc(d)}</li>`).join("") || "<li class='empty'>无</li>"}</ul>
-       <h3 style="font-size:12px;margin:12px 0 4px">待办 ${result.todos.length} 条</h3>
-       <ul class="list">${result.todos.map((t) => `<li>${esc(t)}</li>`).join("") || "<li class='empty'>无</li>"}</ul>`;
-    setStatus("纪要已导入，已同步到待办与长期记忆");
-    await load();
-  } catch (err) { setStatus(err.message, true); }
+    const result = await send("/api/weekly/summarize", { space_id: currentSpace(), day: $("day").value });
+    renderWeekly(result);
+    setStatus(result.method === "llm"
+      ? `已生成周报（读了 ${result.docs} 篇本周文档）`
+      : (result.note || "未启用 LLM，按规则生成"));
+  } catch (err) {
+    setStatus(`生成失败：${err.message}`, true);
+  } finally {
+    $("weeklyGenerate").disabled = false;
+  }
 });
 
 $("weeklyReload").addEventListener("click", async () => {
   try {
-    const weekly = await api(`/api/weekly${$("day").value ? `?day=${$("day").value}` : ""}`);
-    $("weekChip").textContent = weekly.label.title;
-    $("weekTitle").textContent = weekly.label.title;
-    $("weekly").innerHTML = mdToHtml(weekly.markdown);
+    const params = new URLSearchParams();
+    if ($("day").value) params.set("day", $("day").value);
+    if (currentSpace()) params.set("space", currentSpace());
+    renderWeekly(await api(`/api/weekly?${params}`));
     setStatus("周报预览已刷新");
-  } catch (err) { setStatus(err.message, true); }
+  } catch (err) {
+    setStatus(err.message, true);
+  }
 });
 
 $("weeklyPublish").addEventListener("click", async () => {
   $("weeklyPublish").disabled = true;
   setStatus("正在发布周报…");
   try {
-    const result = await send("/api/weekly/publish", { date: $("day").value });
+    const result = await send("/api/weekly/publish", { date: $("day").value, space_id: currentSpace() });
     const link = result.url ? ` · <a href="${esc(result.url)}" target="_blank">打开文档</a>` : "";
     setStatus("");
     $("weekly").insertAdjacentHTML("afterbegin",

@@ -171,7 +171,7 @@ def _rules_progress(store: MemoryStore, *, space_id: str, space_label: str = "")
             f"当前知识库「{scope}」：最近 {decisions} 条决策 / {lessons} 条实验经验（如需连贯摘要请配置 LLM 后重新归纳）"
         )
     if not lines:
-        lines.append(f"该知识库「{scope}」暂无长期记忆，可先导入组会纪要或运行 memory distill")
+        lines.append(f"该知识库「{scope}」暂无长期记忆，可先同步知识库并运行 memory distill")
     return lines
 
 
@@ -180,7 +180,7 @@ def render_brief(brief: Brief) -> str:
 
     lines.append("## 项目进展")
     if isinstance(brief.progress, str):
-        lines.append(brief.progress.strip() or "（暂无进展摘要，可先运行 memory distill 或导入组会纪要）")
+        lines.append(brief.progress.strip() or "（暂无进展摘要，可先运行 memory distill）")
     elif brief.progress:
         lines += [f"- {item}" for item in brief.progress]
     else:

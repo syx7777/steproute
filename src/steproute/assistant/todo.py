@@ -223,6 +223,7 @@ def merged_todos(
     space_id: str = "",
     max_items: int = MAX_ITEMS,
     day: date | None = None,
+    llm_todos: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """合并手动待办与文档待办，并叠加 override。
 
@@ -230,6 +231,9 @@ def merged_todos(
     以及归属该知识库或无归属（``space_id == ""``）的手动待办；**不显示**其他知识库的
     手动待办。``day`` 给定时，文档待办只取**该日期所在自然周内更新过**的文档
     （手动待办不受周限制）。总数不超过 ``max_items``（手动待办优先，不会被截断）。
+
+    ``llm_todos`` 给定时（LLM 归纳结果），用它**替换**文档待办：清单 = 手动待办 + 归纳待办，
+    归纳项以只读形式展示（``source="llm"``，无 id / 不可勾选改删）。
     """
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -251,6 +255,29 @@ def merged_todos(
                 "doc_id": "",
             }
         )
+
+    if llm_todos is not None:
+        extra: list[dict[str, Any]] = []
+        for index, raw in enumerate(llm_todos):
+            text = str(raw).strip()
+            if not text or text.lower() in seen:
+                continue
+            seen.add(text.lower())
+            extra.append(
+                {
+                    "id": f"llm{index}",
+                    "key": f"llm{index}",
+                    "text": text,
+                    "status": OPEN,
+                    "owner": "",
+                    "due": "",
+                    "date": "",
+                    "source": "llm",
+                    "doc_id": "",
+                }
+            )
+        items.extend(extra[: max(0, max_items - len(items))])
+        return items
 
     corpus_items: list[dict[str, Any]] = []
     if corpus is not None:

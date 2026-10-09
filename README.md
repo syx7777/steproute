@@ -108,7 +108,7 @@ steproute/
 │   ├── experiment_logs/           #   实验记录（JSON：config + metrics）
 │   └── repo/                      #   代码仓库：评测协议、结果汇总表
 ├── src/steproute/
-│   ├── cli.py                     # Typer CLI（run / evaluate / sync / brief / minutes / memory / weekly / serve / …）
+│   ├── cli.py                     # Typer CLI（run / evaluate / sync / brief / memory / weekly / serve / …）
 │   ├── config.py                  # Settings（环境变量）+ YAML 配置模型 + 能力档工具函数
 │   ├── secrets.py                 # 安全密钥管理：env → keyring → 加密密钥库；读取即脱敏
 │   ├── net.py                     # 代理为可选能力；连接拒绝给出可执行提示
@@ -142,17 +142,16 @@ steproute/
 │   ├── assistant/                 # 科研助手业务层（CLI 与网站共用）
 │   │   ├── calendar.py            #   学期 / 周次 → 周报命名（`{学年}-{学期}-week{N}`）
 │   │   ├── memory.py              #   项目长期记忆：状态 / 历史决策 / 实验经验
-│   │   ├── minutes.py             #   组会纪要解析（决策 + 待办）与导入
 │   │   ├── todo.py                #   待办清单（手动 + 文档待办，全部可勾选/改/删）
 │   │   ├── distill.py             #   从文档提炼项目状态 / 决策 / 经验 → 长期记忆
 │   │   ├── summarize.py           #   简报 / 待办的 LLM 归纳（失败回退规则 + 输入指纹缓存）
 │   │   ├── brief.py               #   每日工作简报（待办 / 进展 / 飞书更新）
-│   │   └── weekly.py              #   周报汇总、渲染与写入飞书知识库
+│   │   └── weekly.py              #   周报：读本周更新文档正文归纳 + 写入飞书知识库
 │   ├── server/                    # 可视化网站（独立前后端，需 --extra server）
 │   │   ├── app.py                 #   FastAPI 后端（dashboard / todos CRUD / distill / weekly…）
-│   │   └── static/index.html      #   单页前端（工作台 / 组会纪要 / 周报 三页签）
+│   │   └── static/index.html      #   单页前端（工作台 / 周报 两页签）
 │   └── webui.py                   # Gradio 可视化面板（可选）
-└── tests/                         # 171 个离线测试
+└── tests/                         # 178 个离线测试
     └── fixtures/sample_corpus/    #   示例语料（测试与演示用，不污染 data/）
 ```
 
@@ -284,14 +283,13 @@ uv run steproute evaluate --backend api                       # 附带 rubric �
 | `search` | BM25 检索调试 |
 | `sync` | 从外部知识库（飞书）同步文档与评论到 `data/sources/`；`--wiki-space` / `--folder` 指定入口，默认增量 |
 | `brief` | 生成每日工作简报（项目进展 / 飞书更新），落盘 `data/briefs/` |
-| `minutes` | 导入组会纪要：`--file` / `--text`，抽取决策与待办并写入语料与长期记忆 |
 | `memory` | 项目长期记忆：`show` / `state` / `decision` / `lesson` / `distill`（从文档提炼） |
-| `weekly` | 周报：`preview`（本地预览）/ `publish`（写入飞书知识库） |
+| `weekly` | 周报：`preview`（读本周文档正文归纳预览）/ `publish`（写入飞书知识库）；`--source-space` 限定汇总范围、`--no-llm` 只用规则 |
 | `serve` | 启动可视化网站（需 `--extra server`） |
 | `secrets` | `set` / `status` / `delete`；`--name llm_api_key\|feishu_app_secret` |
 | `ui` | 启动 Web UI（需 `--extra ui`） |
 
-### 5.4 真实运行示例（DeepSeek `deepseek-flash` / `deepseek-v4-pro`）
+### 5.4 真实运行示例（DeepSeek `deepseek-v4-flash` / `deepseek-v4.1-flash`）
 
 ```
 $ uv run steproute run --backend api --max-steps 8 --quiet
@@ -357,7 +355,7 @@ uv run steproute search "公平对比 抽帧数"
 > 应用可见性：自建应用默认看不到任何文档，需把应用**加为目标知识库/文档的协作者**；
 > 若只想读**个人**云空间，按飞书文档把应用加进一个群，再将该文件夹共享给该群。
 
-### 5.6 科研助手：简报 / 记忆 / 纪要 / 周报
+### 5.6 科研助手：简报 / 记忆 / 周报
 
 ```powershell
 # 1) 每日工作简报（项目进展 + 飞书更新），落盘 data/briefs/
@@ -375,21 +373,21 @@ uv run steproute memory distill --space 7552806097184784386   # 只提炼某个�
 uv run steproute memory distill --no-llm             # 不调模型，仅按规则抽取决策/经验
 uv run steproute memory show
 
-# 3) 组会纪要导入：抽取「决策」与「待办」→ 写入语料 + 长期记忆
-uv run steproute minutes --file meeting.md
-uv run steproute minutes --text "结论：本轮对比不公平；下一步：统一抽帧数后重跑"
-
-# 4) 周报：先本地预览，再写入飞书知识库
-uv run steproute weekly preview
-uv run steproute weekly publish --space 7671654639892171748
+# 3) 周报：读「本周更新的文档正文」归纳预览，再写入飞书知识库
+uv run steproute weekly preview                                   # 默认全部知识库，走模型（无 Key 自动回退规则）
+uv run steproute weekly preview --source-space 7672220327107103924 --no-llm
+uv run steproute weekly publish --space 7671654639892171748      # --space 是周报「写入目标」知识库
 ```
+
+> 周报**素材 = 指定知识库（`--source-space`）中本周更新的文档正文**；默认调用 `balanced` 档模型归纳成简明周报，
+> 未配置 Key / 调用失败 / 本周无更新文档时回退规则（按文档标题 + 首句罗列）。`weekly preview` 只预览不上传飞书。
 
 **长期记忆的「知识库归属」**（实现见 `assistant/memory.py` / `assistant/distill.py`）：
 
 * 每条长期记忆条目（项目状态 / 历史决策 / 实验经验）都带一个 `space_id`（**知识库归属**），
   它与 `project`（**LLM 归纳出的项目名**，如 `think-with-graph`）相互独立——过滤按前者、不按后者；
 * **切知识库只显示该库 + 无归属的条目**：`space_id` 匹配当前所选知识库、或 `space_id == ""`（用户手写
-  `memory decision/lesson`、组会纪要导入的条目——不属于任何知识库，各库都可见）；**不含其它知识库的条目**；
+  `memory decision/lesson` 的条目——不属于任何知识库，各库都可见）；**不含其它知识库的条目**；
 * `memory distill --space <id>` 会对该库重新提炼，并把新条目打上该库归属（`source="distill"`）；
   不带 `--space` 时提炼全部文档，条目无归属；
 * **历史条目会成为「无归属」（各库都可见），重新提炼一次即可带上归属**：本能力引入前的旧条目没有
@@ -424,7 +422,17 @@ uv run steproute weekly publish --space 7671654639892171748
 周次 = 以学期起始月 1 号**当天或之后**的第一个周一为第 1 周，按自然周递增。
 例：`2026-2-week5`（2026-10-05 那一周）。若与你所在单位的教务口径差一周，改 `first_week_monday()` 一处即可。
 
-**`weekly publish` 做了什么**：在知识库内按关键词找模板文档（默认「模板」，可用 `--template` 指定 token）→ 读取其 `##` 小节作为周报骨架 → 在知识库下新建同名 `docx` → 把 Markdown 转成文档块写入。
+**周报生成**（实现见 `assistant/weekly.py`）：
+
+* **素材 = 本周（周一 ~ 周日）内、指定知识库（`notes/<space_id>/`）下更新过的文档正文**（直读本地语料，
+  `space_id` 为空则不限知识库）；**不再**把长期记忆条目 / 全量待办混进周报；
+* 默认调用模型池 `balanced` 档，把正文归纳成简明周报（内置小节 `本周进展 / 实验与结论 / 下周计划 / 风险与待协助`，
+  每节连贯成文、禁止罗列原文）；未配置 Key / 调用失败 / 本周无更新文档时回退规则（按文档标题 + 首句罗列）；
+* 结果按输入指纹缓存在 `data/weekly_summary.json`，**按知识库（`space_id`）分开保存并校验周次**，
+  切换知识库再切回来仍能读回各自结果；
+* 与简报同一前提：只反映**最后一次同步**看到的内容，远端有新改动时请先「拉取更新」再生成周报。
+
+**`weekly publish` 做了什么**：先取当前（本周 + 该知识库）的周报内容（已生成则用 LLM 结果，否则规则回退）→ 在知识库内按关键词找模板文档（默认「模板」，可用 `--template` 指定 token）→ 读取其 `##` 小节作为周报骨架 → 在知识库下新建同名 `docx` → 把 Markdown 转成文档块写入。
 
 > 需要给应用开通 **创建及编辑新版文档**、**查看/编辑知识库** 权限，并把应用加为该知识空间的**成员**（写节点要求容器编辑权限）。
 
@@ -435,24 +443,23 @@ uv sync --extra server     # 安装 FastAPI / uvicorn
 uv run steproute serve     # 打开 http://127.0.0.1:8000
 ```
 
-三个页签：
+两个页签：
 
 | 页签 | 内容 |
 | --- | --- |
 | **工作台** | 知识库选择（下拉 + 「从该知识库拉取更新」+ 「同时提炼长期记忆」）、每日工作简报、**待办清单**、项目长期记忆 |
-| **组会纪要** | 粘贴纪要 → 解析出「决策」与「待办」→ 写入语料与长期记忆 |
-| **周报** | 预览本周周报，一键写入**固定知识库**（页面上不提供输入框） |
+| **周报** | 预览**工作台所选知识库**中本周更新的文档正文归纳成的周报；「用 LLM 生成周报」→ 生成，「发布到飞书」→ 写入**固定知识库**（页面上不提供写入目标输入框） |
 
 **项目长期记忆**（页签「工作台」）：
 
 * 记忆面板**按当前所选知识库过滤**（`/api/dashboard?space=<id>` 的 `memory` 段）：只显示该库 +
-  无归属（手写 / 纪要导入）的条目，切知识库即切换显示，不再全局混在一起；
+  无归属（手写）的条目，切知识库即切换显示，不再全局混在一起；
 * 每条条目带 `space_id`（**知识库归属**），与 `project`（LLM 归纳出的项目名）无关；面板展示的统计
   （`stats`）、摘要（`summary`）、项目状态 / 决策 / 经验都按该归属过滤。
 
 **待办清单**（[todo.py](file:///d:/Research/面试项目/steproute/src/steproute/assistant/todo.py)）：
 
-* 手动待办（`data/todos.json`）与文档待办（从周报/纪要用例抽取）**都能勾选完成 / 编辑 / 删除**；
+* 手动待办（`data/todos.json`）与文档待办（从周报 / 实验记录等文档抽取）**都能勾选完成 / 编辑 / 删除**；
 * 文档待办不改源 Markdown（否则会破坏语料加载），而是把「改写 / 完成 / 隐藏」记为 `overrides`，展示时叠加；
 * 手动待办在前，文档待办按文档日期倒序，**最多展示 10 条**（`MAX_ITEMS`，手动待办不受限）；
 * 规则抽取只吃「列表项 / 复选框 / 显式待办前缀行」，不再从正文中段抠半句话（碎片）；
@@ -466,6 +473,10 @@ uv run steproute serve     # 打开 http://127.0.0.1:8000
 
 * 点「用 LLM 归纳待办」调用 `POST /api/brief/summarize`，**直读本周更新的文档正文** + 长期记忆归纳成
   可执行待办与一段项目进展摘要，并写入 `data/brief_summary.json` 缓存；
+* **归纳成功后待办清单直接展示模型整理的「归纳」项**（按重要性排序、去重，只读、带 `归纳` 标签），
+  手动待办仍保留在清单最前且可勾选 / 编辑 / 删除；未归纳（或回退规则）时按文档待办展示；
+* 归纳 / 提炼都是**抽取型任务**，调用时统一传 `reasoning_effort="low"`（`balanced` 档默认 `high`，
+  会把 `max_tokens` 全用在 reasoning 上、`content` 为空，表现为"静默回退规则"）；
 * 未配置 LLM 时回退规则模式，界面会**标明这次到底用没用模型以及回退原因**（区分「显式关闭」与「漏传后端」），
   `/api/dashboard` **只读缓存、绝不主动调模型**。
 
@@ -479,7 +490,7 @@ uv run steproute serve     # 打开 http://127.0.0.1:8000
 
 * 知识库选项与周报目标来自 [configs/knowledge_bases.yaml](file:///d:/Research/面试项目/steproute/configs/knowledge_bases.yaml)，改配置即可增删；
 * 点「从该知识库拉取更新」会把该知识库文档增量同步到 `data/sources/notes/<space_id>/`，随后简报 / 待办 / 长期记忆一起刷新；
-* 后端接口：`/api/dashboard`（`?space=<id>` 过滤长期记忆 / 简报 / 待办）、`/api/knowledge-bases`、`/api/brief/refresh`、`/api/brief/summarize`、`/api/todos`（GET/POST）、`/api/todos/manual/{id}`（PUT/DELETE）、`/api/todos/corpus/{key}`（PUT/DELETE）、`/api/memory`（`?space=<id>`，默认不过滤）、`/api/memory/distill`、`/api/minutes`、`/api/weekly`、`/api/weekly/publish`。
+* 后端接口：`/api/dashboard`（`?space=<id>` 过滤长期记忆 / 简报 / 待办 / 周报）、`/api/knowledge-bases`、`/api/brief/refresh`、`/api/brief/summarize`、`/api/todos`（GET/POST）、`/api/todos/manual/{id}`（PUT/DELETE）、`/api/todos/corpus/{key}`（PUT/DELETE）、`/api/memory`（`?space=<id>`，默认不过滤）、`/api/memory/distill`、`/api/weekly`（`?space=<id>&day=` 预览）、`/api/weekly/summarize`、`/api/weekly/publish`。
 
 ---
 
@@ -537,9 +548,9 @@ uvx ruff check src tests    # 静态检查
 覆盖：密钥安全、代理选项与连接诊断、语料加载与 BM25、待办抽取收紧（只认列表项 / 复选框 / 显式前缀，正文碎片不再误抽）、
 特征抽取、Jev 判断与升级、调度器候选/缓存/队列、8 个工具（含公平性检测）、运行时端到端与 4 种策略、
 动作 JSON 解析边界、rubric 评分、飞书同步（列表/递归/增量/评论合并/鉴权）、
-周次命名、长期记忆（含「知识库归属」`space_id` 过滤 / 旧格式无 `space_id` 兼容）、待办增改删（含文档待办 override / 限流 / 按知识库过滤）、纪要解析、每日简报、
-简报 / 待办归纳（直读本周文档正文 + 假后端注入 + 规则回退 + 无更新文档跳过模型 + 输入指纹缓存复用 / 随正文改动失效）、长期记忆提炼（规则回退 + 去重 + 写入打上知识库归属）、
-周报渲染与发布（含模板套用）、Markdown→文档块、网站 API（含按 `space` 过滤长期记忆、`/api/brief/summarize` 与候选计数）、CLI 冒烟。
+周次命名、长期记忆（含「知识库归属」`space_id` 过滤 / 旧格式无 `space_id` 兼容）、待办增改删（含文档待办 override / 限流 / 按知识库过滤）、每日简报、
+简报 / 待办归纳（直读本周文档正文 + 假后端注入 + 规则回退 + 无更新文档跳过模型 + 输入指纹缓存复用 / 随正文改动失效 + 归纳调用低 reasoning + 清单改用归纳结果）、长期记忆提炼（规则回退 + 去重 + 写入打上知识库归属）、
+周报生成（文档驱动 + LLM 归纳 + 按知识库缓存 + 规则回退）、模板套用与发布、Markdown→文档块、网站 API（含按 `space` 过滤长期记忆、`/api/brief/summarize`、`/api/weekly/summarize` 与候选计数）、CLI 冒烟。
 
 ---
 

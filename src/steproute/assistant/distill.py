@@ -21,10 +21,23 @@ from ..corpus.model import Corpus
 from ..llm.backends import APIBackend, Backend
 from ..logging_utils import get_logger
 from .memory import MemoryStore
-from .minutes import DECISION_MARKERS
 from .todo import KB_DOC_PREFIX
 
 logger = get_logger(__name__)
+
+#: 「决策」线索词（规则回退时按关键词抽取）。
+DECISION_MARKERS = (
+    "决定",
+    "确定",
+    "结论",
+    "达成一致",
+    "一致同意",
+    "采用",
+    "定为",
+    "共识",
+    "拍板",
+    "通过",
+)
 
 LESSON_MARKERS = ("教训", "踩坑", "经验", "注意", "失败原因", "提醒")
 MAX_MATERIAL_CHARS = 6000
@@ -162,7 +175,7 @@ def distill_memory(
     store = memory or MemoryStore(data_dir)
     docs = _scoped_docs(corpus, space_id, max_docs=max_docs)
     if not docs:
-        return DistillResult(method="none", note="没有可提炼的文档：请先同步知识库或导入组会纪要")
+        return DistillResult(method="none", note="没有可提炼的文档：请先同步知识库")
 
     result = DistillResult(method="rules", docs=len(docs), project=project)
     payload: dict[str, Any] = {}
@@ -177,7 +190,8 @@ def distill_memory(
                 ],
                 json_mode=True,
                 temperature=0.2,
-                # 同上：推理模型的 reasoning token 会占用 max_tokens，写死太小会拿到空 content。
+                # 抽取型任务用低推理，避免 reasoning token 占满 max_tokens 导致 content 为空。
+                reasoning_effort="low",
                 max_tokens=spec.max_tokens,
                 label="distill",
             )

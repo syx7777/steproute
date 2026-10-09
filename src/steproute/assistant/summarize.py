@@ -7,8 +7,9 @@
 * **规则模式**（LLM 不可用或本周无更新时自动回退）：正则候选按文档日期倒序取前若干条，
   进展取长期记忆摘要。
 
-结果按「输入指纹」缓存在 ``data/brief_summary.json``：本周文档与记忆摘要都没变时
-直接复用缓存，不重复调用模型。
+结果按「输入指纹」缓存在 ``data/brief_summary.json``，**按知识库（``space_id``）分开保存**：
+本周文档与记忆摘要都没变时直接复用缓存、不重复调用模型；切换知识库后再切回来，
+仍能读回该知识库各自的归纳结果，不会因提炼别的知识库而被顶掉。
 """
 
 from __future__ import annotations
@@ -216,7 +217,7 @@ def _rules_progress(space_id: str, *, space_label: str = "", decisions: int, les
     连贯摘要交给 LLM 归纳。``space_label``（知识库中文名）优先于 ``space_id`` 用于文案标注。
     """
     if projects == 0 and decisions == 0 and lessons == 0:
-        return "该知识库暂无长期记忆，可先导入组会纪要或运行 memory distill。"
+        return "该知识库暂无长期记忆，可先同步知识库并运行 memory distill。"
     scope = space_label or space_id or "未指定"
     return (
         f"当前知识库「{scope}」：{decisions} 条最近决策 / {lessons} 条实验经验；"
@@ -237,32 +238,52 @@ def _rules_todos(candidates: list[dict[str, Any]], *, max_todos: int) -> list[st
 
 
 # --------------------------------------------------------------------------- #
-# 缓存
+# 缓存（按知识库分开保存）
 # --------------------------------------------------------------------------- #
 
 def _summary_path(data_dir: Path | str) -> Path:
     return Path(data_dir) / SUMMARY_FILENAME
 
 
-def save_summary(data_dir: Path | str, summary: BriefSummary) -> Path:
-    """把归纳结果写入 ``data/brief_summary.json``。"""
-    path = _summary_path(data_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(summary.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
+def _load_summaries(data_dir: Path | str) -> dict[str, dict[str, Any]]:
+    """读取 ``data/brief_summary.json`` 中全部知识库的归纳结果（按 ``space_id`` 索引）。
 
-
-def load_summary(data_dir: Path | str, *, space_id: str = "") -> BriefSummary | None:
-    """读取缓存；``space_id`` 不匹配（或文件缺失 / 损坏）时返回 ``None``。"""
+    兼容旧版「整份文件只存一个 space 结果」的格式：把顶层那条就势归入其 ``space_id`` 键，
+    下次写入时落成新版 ``{"version": 2, "summaries": {...}}``。
+    """
     path = _summary_path(data_dir)
     if not path.is_file():
-        return None
+        return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
         logger.warning("简报摘要缓存损坏，忽略：%s", path)
-        return None
-    if not isinstance(payload, dict) or str(payload.get("space_id") or "") != space_id:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    summaries = payload.get("summaries")
+    if isinstance(summaries, dict):
+        return {str(key): value for key, value in summaries.items() if isinstance(value, dict)}
+    if any(key in payload for key in ("todos", "progress", "space_id")):
+        return {str(payload.get("space_id") or ""): payload}
+    return {}
+
+
+def save_summary(data_dir: Path | str, summary: BriefSummary) -> Path:
+    """把归纳结果按 ``space_id`` 写入 ``data/brief_summary.json``（不影响其它知识库的缓存）。"""
+    path = _summary_path(data_dir)
+    summaries = _load_summaries(data_dir)
+    summaries[summary.space_id] = summary.to_dict()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"version": 2, "summaries": summaries}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def load_summary(data_dir: Path | str, *, space_id: str = "") -> BriefSummary | None:
+    """读取指定 ``space_id`` 的缓存；无对应条目（或文件缺失 / 损坏）时返回 ``None``。"""
+    payload = _load_summaries(data_dir).get(space_id)
+    if not isinstance(payload, dict):
         return None
     return BriefSummary(
         todos=[str(x) for x in (payload.get("todos") or [])],
@@ -351,8 +372,9 @@ def summarize_brief(
                     ],
                     json_mode=True,
                     temperature=0.2,
-                    # 不要写死 token 上限：推理模型的 reasoning token 会占用额度，
-                    # 上限太小会导致 content 为空（表现为"静默回退规则"）。
+                    # 归纳是抽取型任务，不需要高推理：balanced 档默认 reasoning_effort=high，
+                    # 会把 max_tokens 全用在 reasoning 上、content 为空（表现为"静默回退规则"）。
+                    reasoning_effort="low",
                     max_tokens=spec.max_tokens,
                     label="summarize",
                 )

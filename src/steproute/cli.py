@@ -7,7 +7,6 @@
 * ``ingest`` / ``search`` —— 查看语料与检索效果；
 * ``sync``       —— 从外部知识库（飞书）同步文档与评论到本地语料；
 * ``brief``      —— 生成每日工作简报（项目进展 / 飞书更新）；
-* ``minutes``    —— 导入组会纪要，抽取决策与待办；
 * ``memory``     —— 项目长期记忆：状态 / 决策 / 实验经验；
 * ``weekly``     —— 周报预览与写入飞书知识库；
 * ``serve``      —— 启动可视化网站（需 ``--extra server``）；
@@ -29,12 +28,10 @@ from . import __version__
 from .agent.runtime import STRATEGIES, RunResult
 from .assistant import (
     build_brief,
-    collect_week,
-    import_minutes,
     publish_weekly,
-    render_weekly,
+    summarize_weekly,
 )
-from .assistant.calendar import as_date
+from .assistant.calendar import as_date, label_for
 from .assistant.distill import build_distill_backend, distill_memory
 from .assistant.memory import MemoryStore
 from .config import Settings
@@ -366,7 +363,7 @@ def secrets_delete(
 
 
 # --------------------------------------------------------------------------- #
-# assistant：brief / minutes / memory / weekly
+# assistant：brief / memory / weekly
 # --------------------------------------------------------------------------- #
 
 memory_app = typer.Typer(help="项目长期记忆：状态 / 决策 / 实验经验")
@@ -402,38 +399,6 @@ def brief(
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(result.markdown, encoding="utf-8")
         console.print(f"[dim]已写入 {out}[/dim]")
-
-
-@app.command()
-def minutes(
-    text: str | None = typer.Option(None, "--text", help="直接传入纪要正文"),
-    file: Path | None = typer.Option(None, "--file", help="从文件读取纪要（.md/.txt）"),
-    day: str | None = typer.Option(None, "--date", help="纪要日期 YYYY-MM-DD，默认今天或从正文识别"),
-    title: str = typer.Option("", "--title", help="纪要标题，默认取首个标题"),
-    author: str = typer.Option("", "--author"),
-    remember: bool = typer.Option(True, "--remember/--no-remember", help="是否把抽取到的决策写入长期记忆"),
-    data_dir: Path | None = typer.Option(None, "--data-dir"),
-) -> None:
-    """导入组会纪要：解析决策与待办并落盘进语料。"""
-    if file is None and not text:
-        console.print("[red]请用 --file 或 --text 提供纪要内容[/red]")
-        raise typer.Exit(code=1)
-    content = file.read_text(encoding="utf-8") if file is not None else str(text)
-    settings = _assistant_settings(data_dir)
-    result = import_minutes(
-        settings.data_dir,
-        content,
-        day=as_date(day) if day else None,
-        title=title,
-        author=author,
-        memory=MemoryStore(settings.data_dir),
-        remember_decisions=remember,
-    )
-    console.print(f"[green]已导入：{result.doc_id}[/green]")
-    decisions = "\n".join(f"- {item}" for item in result.parse.decisions) or "（未识别到决策）"
-    todos = "\n".join(f"- {item}" for item in result.parse.todos) or "（未识别到待办）"
-    console.print(Panel(decisions, title="决策", border_style="cyan"))
-    console.print(Panel(todos, title="待办", border_style="magenta"))
 
 
 @memory_app.command("show")
@@ -517,26 +482,48 @@ def memory_distill(
 @weekly_app.command("preview")
 def weekly_preview(
     day: str | None = typer.Option(None, "--date", help="该周内任意日期，默认今天"),
+    source_space: str | None = typer.Option(None, "--source-space", help="汇总范围：知识库 space_id（默认全部知识库）"),
+    no_llm: bool = typer.Option(False, "--no-llm", help="只用规则模式，不调用模型"),
     data_dir: Path | None = typer.Option(None, "--data-dir"),
     out: Path | None = typer.Option(None, "--out"),
 ) -> None:
-    """本地预览周报（不回写飞书）。"""
+    """本地预览周报（读本周更新的文档正文归纳，不回写飞书）。"""
     settings = _assistant_settings(data_dir)
     corpus = load_corpus(settings.data_dir)
-    digest = collect_week(data_dir=settings.data_dir, corpus=corpus, day=as_date(day))
-    markdown = render_weekly(digest)
-    console.print(f"[bold]周报命名：{digest.label.title}[/bold]（{digest.label.start} ~ {digest.label.end}）")
-    console.print(Panel(markdown, title="周报预览", border_style="green"))
+    backend = spec = None
+    if not no_llm:
+        backend, spec = build_distill_backend(settings)
+    try:
+        summary = summarize_weekly(
+            data_dir=settings.data_dir,
+            corpus=corpus,
+            space_id=source_space or "",
+            day=as_date(day),
+            backend=backend,
+            spec=spec,
+            use_llm=not no_llm,
+        )
+    finally:
+        closer = getattr(backend, "close", None)
+        if callable(closer):
+            closer()
+    label = label_for(as_date(day))
+    console.print(f"[bold]周报命名：{label.title}[/bold]（{label.start} ~ {label.end}）")
+    if summary.method != "llm" and summary.note:
+        console.print(f"[yellow]{summary.note}[/yellow]")
+    console.print(Panel(summary.markdown, title="周报预览", border_style="green"))
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(markdown, encoding="utf-8")
+        out.write_text(summary.markdown, encoding="utf-8")
         console.print(f"[dim]已写入 {out}[/dim]")
 
 
 @weekly_app.command("publish")
 def weekly_publish(
     day: str | None = typer.Option(None, "--date"),
-    space: str | None = typer.Option(None, "--space", help="知识库 space_id（默认读 STEPROUTE_FEISHU_WEEKLY_SPACE_ID）"),
+    space: str | None = typer.Option(None, "--space", help="周报写入的知识库 space_id（默认读 STEPROUTE_FEISHU_WEEKLY_SPACE_ID）"),
+    source_space: str | None = typer.Option(None, "--source-space", help="汇总范围：知识库 space_id（默认全部知识库）"),
+    no_llm: bool = typer.Option(False, "--no-llm", help="只用规则模式，不调用模型"),
     template: str | None = typer.Option(None, "--template", help="模板文档 token，优先于关键词匹配"),
     template_keyword: str | None = typer.Option(None, "--template-keyword", help="模板标题关键词，默认「模板」"),
     parent: str | None = typer.Option(None, "--parent", help="父节点 token，默认挂在空间根目录"),
@@ -552,8 +539,25 @@ def weekly_publish(
         raise typer.Exit(code=1)
 
     corpus = load_corpus(settings.data_dir)
-    digest = collect_week(data_dir=settings.data_dir, corpus=corpus, day=as_date(day))
-    markdown = render_weekly(digest)
+    backend = spec = None
+    if not no_llm:
+        backend, spec = build_distill_backend(settings)
+    try:
+        summary = summarize_weekly(
+            data_dir=settings.data_dir,
+            corpus=corpus,
+            space_id=source_space or "",
+            day=as_date(day),
+            backend=backend,
+            spec=spec,
+            use_llm=not no_llm,
+        )
+    finally:
+        closer = getattr(backend, "close", None)
+        if callable(closer):
+            closer()
+    if summary.method != "llm" and summary.note:
+        console.print(f"[yellow]{summary.note}[/yellow]")
 
     client = FeishuClient(
         space_id=space_id,
@@ -565,8 +569,8 @@ def weekly_publish(
         result = publish_weekly(
             client,
             space_id=space_id,
-            markdown=markdown,
-            title=digest.label.title,
+            markdown=summary.markdown,
+            title=summary.week,
             template_token=template or settings.feishu_weekly_template,
             template_keyword=template_keyword or settings.feishu_weekly_template_keyword,
             parent_node_token=parent,
@@ -577,15 +581,15 @@ def weekly_publish(
     finally:
         client.close()
 
-    summary = Table.grid(padding=(0, 2))
-    summary.add_column(justify="right", style="cyan")
-    summary.add_column()
-    summary.add_row("标题", result.title)
-    summary.add_row("文档", result.document_id)
-    summary.add_row("链接", result.url or "（见知识库）")
-    summary.add_row("写入块数", str(result.blocks))
-    summary.add_row("模板", result.template_token or "（未使用）")
-    console.print(Panel(summary, title="周报已发布", border_style="green"))
+    info = Table.grid(padding=(0, 2))
+    info.add_column(justify="right", style="cyan")
+    info.add_column()
+    info.add_row("标题", result.title)
+    info.add_row("文档", result.document_id)
+    info.add_row("链接", result.url or "（见知识库）")
+    info.add_row("写入块数", str(result.blocks))
+    info.add_row("模板", result.template_token or "（未使用）")
+    console.print(Panel(info, title="周报已发布", border_style="green"))
 
 
 # --------------------------------------------------------------------------- #
@@ -599,7 +603,7 @@ def serve(
     data_dir: Path | None = typer.Option(None, "--data-dir"),
     proxy: str | None = typer.Option(None, "--proxy"),
 ) -> None:
-    """启动可视化网站（每日简报 / 待办 / 纪要导入 / 周报）。"""
+    """启动可视化网站（每日简报 / 待办 / 周报）。"""
     try:
         from .server.app import create_app
     except ImportError as exc:  # pragma: no cover - 取决于是否安装可选依赖

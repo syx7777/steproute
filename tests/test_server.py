@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from steproute.assistant.distill import build_distill_backend  # noqa: E402
 from steproute.assistant.memory import MemoryStore  # noqa: E402
+from steproute.assistant.summarize import BriefSummary, save_summary  # noqa: E402
 from steproute.config import Settings  # noqa: E402
 from steproute.llm.schema import ChatResult  # noqa: E402
 from steproute.server import app as app_module  # noqa: E402
@@ -22,7 +23,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEEKLY_SPACE_ID = "7671654639892171748"
 SPACE_ID = "7552806097184784386"  # 实习
 OTHER_SPACE_ID = "7672220327107103924"  # 风控项目
-MINUTES_BODY = "# 组会\n\n- 决定采用 16 帧配置。\n- 下一步：统一抽帧数后重跑。\n"
 #: 文档待办只取「本周更新过」的文档，夹具日期用今天以保证落在当前自然周内。
 TODAY = date.today().isoformat()
 
@@ -155,6 +155,26 @@ def test_dashboard_has_summary_and_candidates(tmp_path: Path) -> None:
     assert isinstance(payload["candidate_todos"], list)
     # dashboard 只读缓存：还没归纳过时 summary 为空
     assert payload["summary"] is None
+
+
+def test_dashboard_prefers_llm_todos_when_summary_available(tmp_path: Path) -> None:
+    """归纳成功（缓存 method=llm）后，清单展示模型整理的待办（只读），替换文档待办。"""
+    with _client(tmp_path) as client:
+        save_summary(
+            tmp_path / "data",
+            BriefSummary(todos=["归纳出的待办 A", "归纳出的待办 B"], method="llm", space_id=SPACE_ID),
+        )
+        payload = client.get("/api/dashboard", params={"space": SPACE_ID}).json()
+        llm_items = [item for item in payload["todos"] if item["source"] == "llm"]
+        assert [item["text"] for item in llm_items] == ["归纳出的待办 A", "归纳出的待办 B"]
+        assert all(item["source"] != "corpus" for item in payload["todos"])  # 文档待办被替换
+
+        # /api/todos（勾选/编辑后的重载）与 dashboard 口径一致
+        todos_api = client.get("/api/todos", params={"space": SPACE_ID}).json()
+        assert [item["text"] for item in todos_api["todos"] if item["source"] == "llm"] == [
+            "归纳出的待办 A",
+            "归纳出的待办 B",
+        ]
 
 
 def test_knowledge_bases_list(tmp_path: Path) -> None:
@@ -290,29 +310,38 @@ def test_manual_todo_space_isolation_via_api(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 纪要 / 周报 / 页面
+# 周报 / 页面
 # --------------------------------------------------------------------------- #
-
-def test_import_minutes_via_api(tmp_path: Path) -> None:
-    with _client(tmp_path) as client:
-        response = client.post("/api/minutes", json={"text": MINUTES_BODY, "date": "2026-10-03"})
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["doc_id"].startswith("meeting_minutes/2026-10-03")
-    assert any("决定采用" in item for item in payload["decisions"])
-    assert any("统一抽帧数" in item for item in payload["todos"])
-
 
 def test_weekly_preview_and_publish_error_without_credentials(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         preview = client.get("/api/weekly", params={"day": "2026-10-05"})
         assert preview.status_code == 200
         assert "本周进展" in preview.json()["markdown"]
-        assert preview.json()["space_id"] == WEEKLY_SPACE_ID
+        assert preview.json()["weekly_space_id"] == WEEKLY_SPACE_ID
 
         publish = client.post("/api/weekly/publish", json={"date": "2026-10-05"})
         assert publish.status_code == 400
         assert "App ID" in publish.json()["detail"]
+
+
+def test_weekly_summarize_falls_back_to_rules_without_llm(tmp_path: Path) -> None:
+    """/api/weekly/summarize 按「本周 + 知识库」归纳；无 Key 时回退规则并写入缓存。"""
+    with _client(tmp_path) as client:
+        response = client.post("/api/weekly/summarize", json={"space_id": SPACE_ID, "day": TODAY, "use_llm": False})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["method"] == "rules"
+        assert payload["docs"] == 1  # 该知识库今天的笔记
+        assert "本周进展" in payload["markdown"]
+
+        # 归纳结果已落缓存，预览能读回（按 space 隔离）
+        preview = client.get("/api/weekly", params={"space": SPACE_ID, "day": TODAY}).json()
+        assert preview["markdown"] == payload["markdown"]
+        assert preview["space_id"] == SPACE_ID
+
+        other = client.get("/api/weekly", params={"space": OTHER_SPACE_ID, "day": TODAY}).json()
+        assert other["method"] == "none"  # 另一个知识库本周没有更新文档
 
 
 def test_refresh_requires_credentials_not_silent(tmp_path: Path) -> None:
@@ -327,4 +356,4 @@ def test_index_page_served(tmp_path: Path) -> None:
         response = client.get("/")
     assert response.status_code == 200
     assert "科研助手" in response.text
-    assert "工作台" in response.text and "组会纪要" in response.text and "周报" in response.text
+    assert "工作台" in response.text and "周报" in response.text

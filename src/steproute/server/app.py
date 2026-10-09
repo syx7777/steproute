@@ -2,17 +2,17 @@
 
 启动：``uv run steproute serve``（需 ``uv sync --extra server``）。
 
-页面结构（三个页签）：
+页面结构（两个页签）：
 
 1. **工作台** —— 知识库选择（可顺带提炼长期记忆）+ 每日工作简报 + 待办清单 + 项目长期记忆；
-2. **组会纪要** —— 粘贴即解析，抽取决策与待办；
-3. **周报** —— 预览并一键写入固定知识库。
+2. **周报** —— 预览并一键写入固定知识库。
 
 知识库选项与周报目标来自 ``configs/knowledge_bases.yaml``。
 """
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -24,15 +24,15 @@ from pydantic import BaseModel, Field
 from ..assistant import (
     build_brief,
     collect_candidates,
-    collect_week,
-    import_minutes,
     load_summary,
+    load_weekly_summary,
     publish_weekly,
-    render_weekly,
     save_summary,
+    save_weekly_summary,
     summarize_brief,
+    summarize_weekly,
 )
-from ..assistant.calendar import as_date
+from ..assistant.calendar import as_date, label_for
 from ..assistant.distill import build_distill_backend, distill_memory
 from ..assistant.memory import MemoryStore
 from ..assistant.todo import TodoStore, merged_todos
@@ -49,14 +49,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 #: 从某个知识库拉取文档时写入语料的位置（二级目录按 space_id 区分）。
 SYNC_TARGET = "notes"
-
-
-class MinutesPayload(BaseModel):
-    text: str = Field(..., min_length=1)
-    title: str = ""
-    author: str = ""
-    date: str = ""
-    remember: bool = True
 
 
 class TodoCreatePayload(BaseModel):
@@ -93,8 +85,23 @@ class SummarizePayload(BaseModel):
     use_llm: bool = True
 
 
+class WeeklySummaryPayload(BaseModel):
+    #: 汇总范围：跟随工作台选中的知识库（空 = 全部知识库）。
+    space_id: str = ""
+    day: str = ""
+    use_llm: bool = True
+
+
 class WeeklyPublishPayload(BaseModel):
+    space_id: str = ""
     date: str = ""
+
+
+def _llm_todos(summary: Any) -> list[str] | None:
+    """归纳成功（method=llm）时用其待办替换文档待办；否则返回 ``None``（走规则合并）。"""
+    if summary is not None and getattr(summary, "method", "") == "llm":
+        return list(getattr(summary, "todos", []) or [])
+    return None
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -134,9 +141,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             summary=summary,
             save=False,
         )
-        todos = merged_todos(todo_store, corpus, space_id=space_id, day=target)
+        todos = merged_todos(
+            todo_store,
+            corpus,
+            space_id=space_id,
+            day=target,
+            llm_todos=_llm_todos(summary),
+        )
         candidates = collect_candidates(runtime.data_dir, corpus, space_id=space_id, day=target)
-        digest = collect_week(data_dir=runtime.data_dir, memory=memory, corpus=corpus, day=target)
         return {
             "date": target.isoformat(),
             "space_id": space_id,
@@ -148,14 +160,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "summary": summary.to_dict() if summary is not None else None,
             "memory": {
                 # 记忆条目的 project 是「LLM 归纳出的项目名」，与知识库无关；
-                # 这里按条目的「知识库归属」（space_id）过滤，无归属条目（手写 / 纪要导入）各库都可见。
+                # 这里按条目的「知识库归属」（space_id）过滤，无归属条目（手写 / 旧数据）各库都可见。
                 "stats": memory.stats(space_id=space_id),
                 "summary": memory.summary(space_id=space_id),
                 "projects": [state.to_dict() for state in memory.projects(space_id=space_id).values()],
                 "decisions": [entry.to_dict() for entry in memory.decisions(limit=20, space_id=space_id)],
                 "lessons": [entry.to_dict() for entry in memory.lessons(limit=20, space_id=space_id)],
             },
-            "weekly": {"label": digest.label.to_dict(), "markdown": render_weekly(digest)},
+            "weekly": _weekly_payload(target, space_id),
             "knowledge_bases": knowledge.to_list(),
             "weekly_space_id": knowledge.weekly_space_id,
         }
@@ -187,6 +199,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if callable(closer):
                     closer()
         save_summary(runtime.data_dir, summary)
+        return summary
+
+    def _weekly_preview(target: date, space_id: str) -> Any:
+        """周报预览：有「同一周 + 同一知识库」的缓存就直接用，否则只做规则回退（不调模型）。"""
+        label = label_for(target)
+        cached = load_weekly_summary(runtime.data_dir, space_id=space_id)
+        if cached is not None and cached.week == label.title:
+            return cached
+        return summarize_weekly(
+            data_dir=runtime.data_dir,
+            corpus=_corpus(),
+            space_id=space_id,
+            day=target,
+            use_llm=False,
+        )
+
+    def _weekly_payload(target: date, space_id: str) -> dict[str, Any]:
+        summary = _weekly_preview(target, space_id)
+        return {
+            "label": label_for(target).to_dict(),
+            "markdown": summary.markdown,
+            "method": summary.method,
+            "note": summary.note,
+            "docs": summary.docs,
+            "space_id": space_id,
+        }
+
+    def _run_weekly_summarize(*, space_id: str, day: str = "", use_llm: bool = True) -> Any:
+        """按「本周 + 知识库」归纳周报（LLM 默认、失败回退规则）并落缓存。"""
+        backend = spec = None
+        if use_llm:
+            backend, spec = build_distill_backend(runtime)
+        try:
+            summary = summarize_weekly(
+                data_dir=runtime.data_dir,
+                corpus=_corpus(),
+                space_id=space_id,
+                day=as_date(day or None),
+                backend=backend,
+                spec=spec,
+                use_llm=use_llm,
+            )
+        finally:
+            if backend is not None:
+                closer = getattr(backend, "close", None)
+                if callable(closer):
+                    closer()
+        save_weekly_summary(runtime.data_dir, summary)
         return summary
 
     # -- 概览 -------------------------------------------------------------- #
@@ -292,7 +352,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def list_todos(space: str = "", day: str = "") -> dict[str, Any]:
         corpus = _corpus()
         target = as_date(day or None)
-        items = merged_todos(_todos(), corpus, space_id=space, day=target)
+        summary = load_summary(runtime.data_dir, space_id=space)
+        items = merged_todos(
+            _todos(), corpus, space_id=space, day=target, llm_todos=_llm_todos(summary)
+        )
         candidates = collect_candidates(runtime.data_dir, corpus, space_id=space, day=target)
         return {
             "todos": items,
@@ -338,46 +401,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _todos().set_override(key, deleted=True)
         return {"ok": True, "key": key}
 
-    # -- 纪要导入 ---------------------------------------------------------- #
-    @app.post("/api/minutes")
-    def post_minutes(payload: MinutesPayload) -> dict[str, Any]:
-        result = import_minutes(
-            runtime.data_dir,
-            payload.text,
-            day=as_date(payload.date) if payload.date else None,
-            title=payload.title,
-            author=payload.author,
-            memory=_memory(),
-            remember_decisions=payload.remember,
-        )
-        return result.to_dict()
-
     # -- 周报 -------------------------------------------------------------- #
     @app.get("/api/weekly")
-    def get_weekly(day: str = "") -> dict[str, Any]:
-        digest = collect_week(
-            data_dir=runtime.data_dir, memory=_memory(), corpus=_corpus(), day=as_date(day or None)
-        )
-        return {
-            "label": digest.label.to_dict(),
-            "markdown": render_weekly(digest),
-            "space_id": knowledge.weekly_space_id,
-        }
+    def get_weekly(day: str = "", space: str = "") -> dict[str, Any]:
+        """周报预览：跟随工作台选中的知识库（``space``）；只读缓存 / 规则回退，不调模型。"""
+        return {**_weekly_payload(as_date(day or None), space), "weekly_space_id": knowledge.weekly_space_id}
+
+    @app.post("/api/weekly/summarize")
+    def post_weekly_summarize(payload: WeeklySummaryPayload) -> dict[str, Any]:
+        """按「本周该知识库的更新文档正文」用 LLM 归纳周报，并写入缓存。"""
+        summary = _run_weekly_summarize(space_id=payload.space_id, day=payload.day, use_llm=payload.use_llm)
+        return {**summary.to_dict(), "label": label_for(as_date(payload.day or None)).to_dict()}
 
     @app.post("/api/weekly/publish")
     def post_weekly(payload: WeeklyPublishPayload) -> dict[str, Any]:
-        space_id = knowledge.weekly_space_id
-        if not space_id:
+        target_space = knowledge.weekly_space_id
+        if not target_space:
             raise HTTPException(status_code=500, detail="未配置周报写入的知识库（configs/knowledge_bases.yaml）")
 
-        digest = collect_week(
-            data_dir=runtime.data_dir,
-            memory=_memory(),
-            corpus=_corpus(),
-            day=as_date(payload.date or None),
-        )
+        # 发布当前预览（已生成则用 LLM 结果，否则规则回退）；生成请走 /api/weekly/summarize。
+        summary = _weekly_preview(as_date(payload.date or None), payload.space_id)
         client = FeishuClient(
-            space_id=space_id,
+            space_id=target_space,
             base_url=runtime.feishu_base_url,
             site_url=runtime.feishu_site_url,
             settings=runtime,
@@ -385,9 +430,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             result = publish_weekly(
                 client,
-                space_id=space_id,
-                markdown=render_weekly(digest),
-                title=digest.label.title,
+                space_id=target_space,
+                markdown=summary.markdown,
+                title=summary.week,
                 template_token=runtime.feishu_weekly_template,
                 template_keyword=runtime.feishu_weekly_template_keyword,
             )

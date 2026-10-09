@@ -1,4 +1,4 @@
-"""科研助手业务层测试：周次命名 / 长期记忆 / 纪要导入 / 简报 / 周报（全部离线）。"""
+"""科研助手业务层测试：周次命名 / 长期记忆 / 简报 / 周报（全部离线）。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from steproute.assistant.brief import build_brief, week_feishu_updates
 from steproute.assistant.calendar import first_week_monday, label_for, report_title, week_index, week_range
 from steproute.assistant.distill import build_distill_backend, distill_memory
 from steproute.assistant.memory import MemoryStore
-from steproute.assistant.minutes import import_minutes, parse_minutes
 from steproute.assistant.summarize import (
     BriefSummary,
     collect_week_documents,
@@ -21,7 +20,14 @@ from steproute.assistant.summarize import (
     summarize_brief,
 )
 from steproute.assistant.todo import TodoStore, merged_todos
-from steproute.assistant.weekly import collect_week, publish_weekly, render_weekly, template_sections
+from steproute.assistant.weekly import (
+    WeeklySummary,
+    load_weekly_summary,
+    publish_weekly,
+    save_weekly_summary,
+    summarize_weekly,
+    template_sections,
+)
 from steproute.cli import app
 from steproute.config import Settings
 from steproute.connectors.feishu import markdown_to_blocks
@@ -29,15 +35,6 @@ from steproute.corpus.loaders import load_corpus
 from steproute.llm.schema import ChatResult
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-MINUTES_BODY = """# 组会纪要
-
-## 讨论
-- 结论：EXP-002 与 baseline 分辨率不一致，本轮对比不公平。
-- 决定采用 16 帧 / 224 分辨率统一配置。
-- 下一步：统一抽帧数后重跑一轮公平对比。
-- [ ] 补充 seed=42 的复现记录。
-"""
 
 
 def _make_data_dir(tmp_path: Path) -> Path:
@@ -240,30 +237,6 @@ def test_adopt_orphans_no_match_returns_zero(tmp_path: Path) -> None:
     assert store.adopt_orphans("SP_A", ["不存在的文本"]) == 0
     assert store.decisions_path.read_text(encoding="utf-8") == before  # 文件未被改写
     assert store.decisions()[0].space_id == ""
-
-
-# --------------------------------------------------------------------------- #
-# 纪要导入
-# --------------------------------------------------------------------------- #
-
-def test_parse_minutes_extracts_decisions_and_todos() -> None:
-    parsed = parse_minutes(MINUTES_BODY, day=date(2026, 10, 3))
-    assert parsed.title == "组会纪要"
-    assert any("不公平" in item for item in parsed.decisions)
-    assert any("统一抽帧数" in item for item in parsed.todos)
-    assert any("补全" in item or "补充 seed" in item for item in parsed.todos)
-
-
-def test_import_minutes_lands_in_corpus(tmp_path: Path) -> None:
-    data = _make_data_dir(tmp_path)
-    store = MemoryStore(data)
-    result = import_minutes(data, MINUTES_BODY, day=date(2026, 10, 3), memory=store)
-
-    assert result.doc_id.startswith("meeting_minutes/2026-10-03")
-    corpus = load_corpus(data)
-    assert corpus.get(result.doc_id) is not None
-    # 决策同时进入长期记忆
-    assert store.stats()["decisions"] >= 1
 
 
 # --------------------------------------------------------------------------- #
@@ -610,10 +583,12 @@ class _FakeLLMBackend:
         self.content = content
         self.calls = 0
         self.messages: list[list[dict[str, str]]] = []
+        self.kwargs: list[dict] = []
 
     def complete(self, spec, messages, **kwargs) -> ChatResult:
         self.calls += 1
         self.messages.append(list(messages))
+        self.kwargs.append(dict(kwargs))
         return ChatResult(content=self.content)
 
 
@@ -725,6 +700,45 @@ def test_summarize_with_fake_backend(tmp_path: Path) -> None:
     assert result.progress == "项目正在进行公平对比。"
 
 
+def test_assistant_calls_use_low_reasoning(tmp_path: Path) -> None:
+    """归纳 / 提炼都是抽取型任务：必须传 reasoning_effort=low，否则 reasoning 会占满 max_tokens。"""
+    data = _make_data_dir(tmp_path)
+    spec = _balanced_spec()
+
+    summarize_backend = _FakeLLMBackend('{"todos": ["推进实验"], "progress": "进行中。"}')
+    summarize_brief(data_dir=data, corpus=load_corpus(data), backend=summarize_backend, spec=spec)
+    assert summarize_backend.kwargs[0]["reasoning_effort"] == "low"
+
+    distill_backend = _FakeLLMBackend('{"project": "P", "status": "进行中", "decisions": [], "lessons": []}')
+    distill_memory(data_dir=data, corpus=load_corpus(data), backend=distill_backend, spec=spec)
+    assert distill_backend.kwargs[0]["reasoning_effort"] == "low"
+
+    _write_note(data, space_id=NOTES_SPACE, name="w", title="笔记",
+                date_line=f"date: {date.today().isoformat()}\n", body="本周正文。")
+    weekly_backend = _FakeLLMBackend('{"本周进展": "进展", "实验与结论": "x", "下周计划": "y", "风险与待协助": "z"}')
+    summarize_weekly(data_dir=data, corpus=load_corpus(data), space_id=NOTES_SPACE,
+                     day=date.today(), backend=weekly_backend, spec=spec)
+    assert weekly_backend.kwargs[0]["reasoning_effort"] == "low"
+
+
+def test_merged_todos_prefers_llm_summary(tmp_path: Path) -> None:
+    """给定 LLM 归纳结果时，清单 = 手动待办 + 归纳项（只读 source=llm），文档待办被替换。"""
+    data = _make_data_dir(tmp_path)
+    _write_note(data, space_id=NOTES_SPACE, name="n", title="笔记",
+                date_line="date: 2026-10-06\n", body="- 下一步：文档里抽出的待办\n")
+    corpus = load_corpus(data)
+    store = TodoStore(data)
+    store.add("手动待办", space_id=NOTES_SPACE)
+
+    with_llm = merged_todos(store, corpus, space_id=NOTES_SPACE, llm_todos=["归纳 A", "归纳 B"])
+    assert [item["text"] for item in with_llm] == ["手动待办", "归纳 A", "归纳 B"]
+    assert [item["source"] for item in with_llm] == ["manual", "llm", "llm"]
+
+    plain = merged_todos(store, corpus, space_id=NOTES_SPACE)
+    assert all(item["source"] != "llm" for item in plain)
+    assert any(item["source"] == "corpus" for item in plain)
+
+
 def test_summarize_cache_round_trip_and_fingerprint_reuse(tmp_path: Path) -> None:
     data = _make_data_dir(tmp_path)
     corpus = load_corpus(data)
@@ -743,6 +757,31 @@ def test_summarize_cache_round_trip_and_fingerprint_reuse(tmp_path: Path) -> Non
     again = summarize_brief(data_dir=data, corpus=corpus, backend=backend, spec=spec)
     assert backend.calls == 1  # 指纹相同 → 复用缓存，未再调模型
     assert again.todos == first.todos
+
+
+def test_summary_cache_is_isolated_per_space(tmp_path: Path) -> None:
+    """切换知识库再切回来要能读回各自的归纳结果：保存一个库不能顶掉另一个库的缓存。"""
+    data = _make_data_dir(tmp_path)
+    save_summary(data, BriefSummary(todos=["A 的待办"], progress="A 的进展", method="llm", space_id="SP_A"))
+    save_summary(data, BriefSummary(todos=["B 的待办"], progress="B 的进展", method="llm", space_id="SP_B"))
+
+    a = load_summary(data, space_id="SP_A")
+    b = load_summary(data, space_id="SP_B")
+    assert a is not None and a.todos == ["A 的待办"] and a.progress == "A 的进展"
+    assert b is not None and b.todos == ["B 的待办"] and b.progress == "B 的进展"
+    assert load_summary(data, space_id="SP_C") is None
+
+
+def test_legacy_single_summary_file_is_still_readable(tmp_path: Path) -> None:
+    """旧的「单条 summary」文件升级后仍能按 space_id 读回，不丢历史缓存。"""
+    data = _make_data_dir(tmp_path)
+    (data / "brief_summary.json").write_text(
+        json.dumps({"todos": ["旧待办"], "progress": "旧进展", "method": "llm", "space_id": "SP_OLD"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    loaded = load_summary(data, space_id="SP_OLD")
+    assert loaded is not None and loaded.todos == ["旧待办"] and loaded.progress == "旧进展"
+    assert load_summary(data, space_id="SP_NEW") is None
 
 
 # --------------------------------------------------------------------------- #
@@ -863,30 +902,91 @@ def test_summarize_fingerprint_tracks_week_document_changes(tmp_path: Path) -> N
 # 周报
 # --------------------------------------------------------------------------- #
 
-def test_render_weekly_uses_default_sections(tmp_path: Path) -> None:
+def test_summarize_weekly_uses_default_sections_with_llm(tmp_path: Path) -> None:
+    """周报 = 本周该知识库文档正文 → LLM 按内置小节归纳。"""
     data = _make_data_dir(tmp_path)
-    digest = collect_week(data_dir=data, corpus=load_corpus(data), day=date(2026, 10, 5))
-    markdown = render_weekly(digest)
+    _write_note(data, space_id=NOTES_SPACE, name="proj", title="风控周记",
+                date_line="date: 2026-10-06\n", body="本周跑公平对比实验，卡在配置不一致。")
+    backend = _FakeLLMBackend(
+        '{"本周进展": "对齐配置并重跑。", "实验与结论": "对比不公平。",'
+        ' "下周计划": "统一抽帧数。", "风险与待协助": "算力不足。"}'
+    )
 
-    assert markdown.startswith(f"# {digest.label.title}")
+    summary = summarize_weekly(
+        data_dir=data, corpus=load_corpus(data), space_id=NOTES_SPACE,
+        day=date(2026, 10, 6), backend=backend, spec=_balanced_spec(),
+    )
+
+    assert summary.method == "llm"
+    assert summary.docs == 1  # 只有 notes/<space>/ 下本周的文档计入
+    assert summary.markdown.startswith(f"# {summary.week}")
     for section in ("本周进展", "实验与结论", "下周计划", "风险与待协助"):
-        assert f"## {section}" in markdown
-    assert "统一抽帧数" in markdown
+        assert f"## {section}" in summary.markdown
+    assert "对齐配置并重跑。" in summary.markdown
+    assert "风控周记" in backend.messages[0][-1]["content"]  # 文档正文进了素材
 
 
-def test_render_weekly_uses_template_sections(tmp_path: Path) -> None:
-    template = "# 周报\n\n## 本周工作总结\n- x\n\n## 实验与结论\n- y\n\n## 下周计划\n- z\n"
-    sections = template_sections(template)
-    assert sections == ["本周工作总结", "实验与结论", "下周计划"]
-
+def test_summarize_weekly_scopes_space_and_reuses_cache(tmp_path: Path) -> None:
+    """只读所选知识库的本周文档；指纹一致时复用缓存不再调模型。"""
     data = _make_data_dir(tmp_path)
-    digest = collect_week(data_dir=data, corpus=load_corpus(data), day=date(2026, 10, 5))
-    markdown = render_weekly(digest, sections=sections)
+    _write_note(data, space_id=NOTES_SPACE, name="a", title="A 库文档",
+                date_line="date: 2026-10-06\n", body="A 正文。")
+    _write_note(data, space_id="OTHER", name="b", title="B 库文档",
+                date_line="date: 2026-10-06\n", body="B 正文。")
+    backend = _FakeLLMBackend(
+        '{"本周进展": "A 的进展", "实验与结论": "x", "下周计划": "y", "风险与待协助": "z"}'
+    )
+    spec = _balanced_spec()
 
-    for section in sections:
-        assert f"## {section}" in markdown
-    # 「下周计划」这类小节应装载待办
-    assert "统一抽帧数" in markdown
+    first = summarize_weekly(data_dir=data, corpus=load_corpus(data), space_id=NOTES_SPACE,
+                             day=date(2026, 10, 6), backend=backend, spec=spec)
+    assert first.docs == 1 and backend.calls == 1
+    assert "A 正文" in backend.messages[0][-1]["content"]
+    save_weekly_summary(data, first)
+
+    again = summarize_weekly(data_dir=data, corpus=load_corpus(data), space_id=NOTES_SPACE,
+                             day=date(2026, 10, 6), backend=backend, spec=spec)
+    assert backend.calls == 1  # 指纹一致 → 复用缓存
+    assert again.markdown == first.markdown
+
+
+def test_summarize_weekly_rules_fallback_without_llm(tmp_path: Path) -> None:
+    """未启用 LLM 时回退规则：按文档标题 + 首句罗列进首个小节。"""
+    data = _make_data_dir(tmp_path)
+    _write_note(data, space_id=NOTES_SPACE, name="proj", title="风控周记",
+                date_line="date: 2026-10-06\n", body="本周跑公平对比实验。")
+
+    summary = summarize_weekly(data_dir=data, corpus=load_corpus(data), space_id=NOTES_SPACE,
+                               day=date(2026, 10, 6), use_llm=False)
+
+    assert summary.method == "rules"
+    assert "## 本周进展" in summary.markdown
+    assert "风控周记" in summary.markdown
+
+
+def test_summarize_weekly_without_documents(tmp_path: Path) -> None:
+    """本周该知识库没有更新文档 → method=none，不调模型。"""
+    data = _make_data_dir(tmp_path)
+    summary = summarize_weekly(data_dir=data, corpus=load_corpus(data), space_id=NOTES_SPACE, day=date(2026, 10, 6))
+    assert summary.method == "none"
+    assert summary.docs == 0
+    assert "## 本周进展" in summary.markdown
+
+
+def test_weekly_summary_cache_is_isolated_per_space(tmp_path: Path) -> None:
+    """切换知识库再切回来要能读回各自的周报缓存：保存一个库不能顶掉另一个库。"""
+    data = _make_data_dir(tmp_path)
+    save_weekly_summary(data, WeeklySummary(markdown="A 周报", method="llm", week="2026-2-week6", space_id="SP_A"))
+    save_weekly_summary(data, WeeklySummary(markdown="B 周报", method="llm", week="2026-2-week6", space_id="SP_B"))
+
+    assert load_weekly_summary(data, space_id="SP_A").markdown == "A 周报"
+    assert load_weekly_summary(data, space_id="SP_B").markdown == "B 周报"
+    assert load_weekly_summary(data, space_id="SP_C") is None
+
+
+def test_template_sections_extracts_headings() -> None:
+    template = "# 周报\n\n## 本周工作总结\n- x\n\n## 实验与结论\n- y\n\n## 下周计划\n- z\n"
+    assert template_sections(template) == ["本周工作总结", "实验与结论", "下周计划"]
 
 
 class _FakeFeishu:
@@ -961,7 +1061,7 @@ def test_markdown_to_blocks_handles_code_fence() -> None:
 def test_cli_help_lists_assistant_commands() -> None:
     result = CliRunner().invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ("brief", "minutes", "memory", "weekly", "serve"):
+    for command in ("brief", "memory", "weekly", "serve"):
         assert command in result.stdout
 
 
@@ -973,12 +1073,12 @@ def test_cli_brief_and_weekly_preview(tmp_path: Path) -> None:
     assert brief_result.exit_code == 0, brief_result.stdout
     assert "项目进展" in brief_result.stdout
 
-    weekly_result = runner.invoke(app, ["weekly", "preview", "--data-dir", str(data)])
+    weekly_result = runner.invoke(app, ["weekly", "preview", "--data-dir", str(data), "--no-llm"])
     assert weekly_result.exit_code == 0, weekly_result.stdout
     assert "周报命名" in weekly_result.stdout
 
 
-def test_cli_memory_and_minutes(tmp_path: Path) -> None:
+def test_cli_memory(tmp_path: Path) -> None:
     data = _make_data_dir(tmp_path)
     runner = CliRunner()
 
@@ -987,7 +1087,3 @@ def test_cli_memory_and_minutes(tmp_path: Path) -> None:
 
     decision = runner.invoke(app, ["memory", "decision", "--data-dir", str(data), "统一配置后重跑"])
     assert decision.exit_code == 0, decision.stdout
-
-    minutes_result = runner.invoke(app, ["minutes", "--data-dir", str(data), "--text", MINUTES_BODY, "--date", "2026-10-03"])
-    assert minutes_result.exit_code == 0, minutes_result.stdout
-    assert "已导入" in minutes_result.stdout
