@@ -33,6 +33,12 @@ SECRET_NAME = "llm_api_key"
 ENV_VAR = "STEPROUTE_LLM_API_KEY"
 VAULT_PASSPHRASE_ENV = "STEPROUTE_VAULT_PASSPHRASE"
 
+#: 已知密钥名 → 对应环境变量（供 :func:`manager_for` 与 CLI 复用）。
+KNOWN_SECRET_ENV: dict[str, str] = {
+    SECRET_NAME: ENV_VAR,
+    "feishu_app_secret": "STEPROUTE_FEISHU_APP_SECRET",
+}
+
 _KDF_ITERATIONS = 480_000
 _VAULT_VERSION = 1
 
@@ -288,8 +294,9 @@ class SecretsManager:
             raise SecretNotFoundError(
                 "未找到 LLM API Key。请任选一种方式配置：\n"
                 f"  1) 推荐：uv run steproute secrets set        # 存入系统凭据管理器\n"
-                f"  2) 临时：$env:{self.env_var} = '<your-key>'      # 仅当前会话有效\n"
-                f"  3) 加密库：uv run steproute secrets set --backend vault"
+                f"  2) 写进 .env：STEPROUTE_LLM_API_KEY=<your-key>（明文落盘，.env 已 gitignore）\n"
+                f"  3) 临时：$env:{self.env_var} = '<your-key>'      # 仅当前会话有效\n"
+                f"  4) 加密库：uv run steproute secrets set --backend vault"
             )
         return resolved.value
 
@@ -317,8 +324,8 @@ class SecretsManager:
             raise SecretError("密钥中不应包含空白字符。")
         return value
 
-    def set_llm_api_key(self, value: str, *, backend: str = "keyring") -> str:
-        """写入密钥，返回实际使用的后端名。"""
+    def set_secret(self, value: str, *, backend: str = "keyring") -> str:
+        """写入密钥（键名即 ``self.name``），返回实际使用的后端名。"""
         value = self.validate(value)
         if backend == "keyring":
             if not keyring_available():
@@ -335,8 +342,8 @@ class SecretsManager:
         register_secret(value)
         return backend
 
-    def delete_llm_api_key(self) -> list[str]:
-        """从所有可用后端删除密钥，返回被清理的后端列表。"""
+    def delete_secret(self) -> list[str]:
+        """从所有可用后端删除密钥（``self.name``），返回被清理的后端列表。"""
         removed: list[str] = []
         if keyring_available():
             try:
@@ -364,5 +371,15 @@ def _default_vault_path() -> Path:
 
 
 def default_manager(**kwargs: Any) -> SecretsManager:
-    """构造默认 :class:`SecretsManager`。"""
+    """构造默认 :class:`SecretsManager`（键名为 ``llm_api_key``）。"""
     return SecretsManager(**kwargs)
+
+
+def manager_for(name: str = SECRET_NAME, **kwargs: Any) -> SecretsManager:
+    """按密钥名构造管理器，自动挑选对应的环境变量。
+
+    ``llm_api_key`` → ``STEPROUTE_LLM_API_KEY``；``feishu_app_secret`` →
+    ``STEPROUTE_FEISHU_APP_SECRET``；其它名称回退为 ``STEPROUTE_<NAME>``。
+    """
+    env_var = KNOWN_SECRET_ENV.get(name, f"STEPROUTE_{name.upper()}")
+    return SecretsManager(name=name, env_var=env_var, **kwargs)

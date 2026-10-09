@@ -2,13 +2,14 @@
 
 * :class:`Settings` —— 运行期环境配置（环境变量 / ``.env``，全部为**非敏感**项）。
 * ``configs/models.yaml`` —— 模型池：能力档、端点、成本与调度画像。
-* 其余 ``configs/*.yaml`` —— 路由（Jev）、调度（Scheduler）、Agent 行为与评估配置。
+* 其余 ``configs/*.yaml`` —— 路由（Jev）、调度（Scheduler）与 Agent 行为配置。
 
 密钥不在这里解析，统一由 :mod:`steproute.secrets` 负责。
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -48,6 +49,10 @@ class Settings(BaseSettings):
     )
 
     # ---- LLM 网关 ----
+    #: LLM API Key。**可选**：为"把凭证都放进 .env"的本地便利而设；
+    #: 填写即为**明文落盘**，安全性低于 secrets（keyring / 加密密钥库）。
+    #: 留空时回退到 :mod:`steproute.secrets` 解析链。``repr=False`` 避免打印时泄漏。
+    llm_api_key: str = Field(default="", repr=False)
     #: 默认网关：既可以是 DeepSeek 官方，也可以是本地 vLLM 的 OpenAI 兼容地址。
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_timeout: float = 180.0
@@ -65,6 +70,24 @@ class Settings(BaseSettings):
     proxy_url: str | None = None
     trust_env_proxy: bool = True
     http_timeout: float = 30.0
+
+    # ---- 外部来源同步（飞书）----
+    #: 飞书开放平台基地址（仅 ``steproute sync`` 使用）。
+    feishu_base_url: str = "https://open.feishu.cn/open-apis"
+    #: 飞书自建应用 App ID（非敏感项）。
+    feishu_app_id: str = ""
+    #: 飞书自建应用 App Secret。**可选**：仅为"把凭证都放进 .env"的本地便利而设；
+    #: 一旦填写即为**明文落盘**，安全性低于 secrets（keyring / 加密密钥库）。
+    #: 留空时回退到 :mod:`steproute.secrets` 解析链。``repr=False`` 避免打印时泄漏。
+    feishu_app_secret: str = Field(default="", repr=False)
+    #: 拼接文档链接用的站点地址。
+    feishu_site_url: str = "https://feishu.cn"
+    #: 周报写入的知识库 space_id（``steproute weekly publish`` 使用）。
+    feishu_weekly_space_id: str = ""
+    #: 周报模板文档 token；留空则按标题关键词在知识库内自动匹配。
+    feishu_weekly_template: str = ""
+    #: 自动匹配模板时使用的标题关键词。
+    feishu_weekly_template_keyword: str = "模板"
 
     # ---- 运行时 ----
     data_dir: Path = Path("data")
@@ -268,24 +291,6 @@ class AgentConfig(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
-# 评估
-# --------------------------------------------------------------------------- #
-
-class EvalConfig(BaseModel):
-    """评估（仿真基准 + 消融）配置。"""
-
-    seed: int = 20261008
-    num_tasks: int = 40
-    #: 每条轨迹的步数范围（含端点）。
-    min_steps: int = 6
-    max_steps: int = 12
-    #: 仿真：低能力档遇上超纲步骤时的失败概率。
-    failure_prob_when_underpowered: float = 0.75
-    #: 仿真：失败后的重试开销倍率。
-    retry_cost_multiplier: float = 1.6
-
-
-# --------------------------------------------------------------------------- #
 # 聚合
 # --------------------------------------------------------------------------- #
 
@@ -294,7 +299,6 @@ class AppConfig(BaseModel):
     jev: JevConfig = Field(default_factory=JevConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
-    evaluation: EvalConfig = Field(default_factory=EvalConfig)
 
 
 # --------------------------------------------------------------------------- #
@@ -369,5 +373,47 @@ def load_app_config(config_dir: Path | str = "configs") -> AppConfig:
         jev=JevConfig(**load_yaml(directory / "jev.yaml")),
         scheduler=SchedulerConfig(**load_yaml(directory / "scheduler.yaml")),
         agent=AgentConfig(**load_yaml(directory / "agent.yaml")),
-        evaluation=EvalConfig(**load_yaml(directory / "evaluation.yaml")),
     )
+
+
+# --------------------------------------------------------------------------- #
+# 知识库（简报页选择器 + 周报固定写入目标）
+# --------------------------------------------------------------------------- #
+
+#: ``configs/knowledge_bases.yaml`` 缺失时的兜底。
+DEFAULT_WEEKLY_SPACE_ID = "7671654639892171748"
+DEFAULT_KNOWLEDGE_BASES: tuple[tuple[str, str], ...] = (
+    ("实习", "7552806097184784386"),
+    ("风控项目", "7672220327107103924"),
+    ("AI4Phy", "7552812149661057025"),
+    ("自学", "7626974321562389714"),
+)
+
+
+@dataclass(frozen=True)
+class KnowledgeBaseConfig:
+    """可选知识库列表 + 周报固定写入的知识库。"""
+
+    weekly_space_id: str
+    options: tuple[tuple[str, str], ...]
+
+    def to_list(self) -> list[dict[str, str]]:
+        return [{"name": name, "space_id": space_id} for name, space_id in self.options]
+
+    def name_of(self, space_id: str) -> str:
+        for name, candidate in self.options:
+            if candidate == space_id:
+                return name
+        return space_id
+
+
+def load_knowledge_bases(config_dir: Path | str = "configs") -> KnowledgeBaseConfig:
+    """读取 ``configs/knowledge_bases.yaml``（缺失或为空时回退内置默认值）。"""
+    raw = load_yaml(Path(config_dir) / "knowledge_bases.yaml")
+    weekly = str(raw.get("weekly_space_id") or DEFAULT_WEEKLY_SPACE_ID)
+
+    options: list[tuple[str, str]] = []
+    for item in raw.get("knowledge_bases") or []:
+        if isinstance(item, dict) and item.get("name") and item.get("space_id"):
+            options.append((str(item["name"]), str(item["space_id"])))
+    return KnowledgeBaseConfig(weekly_space_id=weekly, options=tuple(options) or DEFAULT_KNOWLEDGE_BASES)

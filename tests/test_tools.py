@@ -22,13 +22,13 @@ def test_search_then_read(bundle) -> None:
     assert state.read_ids
 
 
-def test_read_unknown_document_fails() -> None:
+def test_read_unknown_document_fails(sample_corpus) -> None:
     state = AgentState(task="t")
     # 无 bundle 也可构造一个最小执行器
     from steproute.corpus.loaders import load_corpus
     from steproute.corpus.retriever import Retriever
 
-    corpus = load_corpus("data")
+    corpus = load_corpus(sample_corpus)
     executor = ToolExecutor(corpus, Retriever(corpus))
     result = executor.execute(state, "read_document", {"doc_id": "not-exist"})
     assert not result.ok

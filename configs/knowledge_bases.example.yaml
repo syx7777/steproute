@@ -1,0 +1,14 @@
+# 复制为 configs/knowledge_bases.yaml 后填写你自己的知识库。
+# 注意：真实文件 configs/knowledge_bases.yaml 已被 .gitignore 排除（含团队知识库 ID，不上传）。
+#
+# space_id 获取方式：打开该知识库 → 设置页地址栏里的数字部分。
+
+# 周报固定写入该知识库（`steproute weekly publish` / 网页「周报」页签）
+weekly_space_id: "0000000000000000000"
+
+# 简报页的「知识库选择」下拉；顺序即默认选中项
+knowledge_bases:
+  - name: 项目A
+    space_id: "1111111111111111111"
+  - name: 项目B
+    space_id: "2222222222222222222"

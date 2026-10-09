@@ -1336,6 +1336,10 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
+server = [
+    { name = "fastapi" },
+    { name = "uvicorn" },
+]
 ui = [
     { name = "gradio" },
 ]
@@ -1343,6 +1347,7 @@ ui = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=42.0" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.111" },
     { name = "gradio", marker = "extra == 'ui'", specifier = ">=4.44" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "keyring", specifier = ">=25.2" },
@@ -1355,8 +1360,9 @@ requires-dist = [
     { name = "rich", specifier = ">=13.7" },
     { name = "tenacity", specifier = ">=8.3" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.30" },
 ]
-provides-extras = ["ui", "dev"]
+provides-extras = ["ui", "server", "dev"]
 
 [[package]]
 name = "tenacity"

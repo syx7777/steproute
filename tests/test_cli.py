@@ -20,18 +20,18 @@ def test_version() -> None:
 def test_help_lists_commands() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ("run", "benchmark", "ingest", "search", "secrets"):
+    for command in ("run", "evaluate", "ingest", "search", "sync", "secrets"):
         assert command in result.stdout
 
 
-def test_ingest_outputs_stats() -> None:
-    result = runner.invoke(app, ["ingest"])
+def test_ingest_outputs_stats(sample_corpus) -> None:
+    result = runner.invoke(app, ["ingest", "--data-dir", str(sample_corpus)])
     assert result.exit_code == 0
     assert "documents" in result.stdout
 
 
-def test_search_finds_hits() -> None:
-    result = runner.invoke(app, ["search", "baseline 对比 公平"])
+def test_search_finds_hits(sample_corpus) -> None:
+    result = runner.invoke(app, ["search", "baseline 对比 公平", "--data-dir", str(sample_corpus)])
     assert result.exit_code == 0
     assert "baseline" in result.stdout or "纪要" in result.stdout
 
@@ -43,13 +43,6 @@ def test_run_offline_writes_json(tmp_path) -> None:
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["strategy"] == "step_level"
     assert payload["steps"] > 0
-
-
-def test_benchmark_writes_artifacts(tmp_path) -> None:
-    result = runner.invoke(app, ["benchmark", "--tasks", "10", "--out-dir", str(tmp_path)])
-    assert result.exit_code == 0, result.stdout
-    assert (tmp_path / "routing_benchmark.md").is_file()
-    assert (tmp_path / "routing_benchmark.json").is_file()
 
 
 def test_secrets_status_masks_key(monkeypatch) -> None:

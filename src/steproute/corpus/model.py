@@ -87,10 +87,12 @@ class TodoItem:
         return {"text": self.text, "doc_id": self.doc_id, "date": self.date, "owner": self.owner, "status": self.status}
 
 
-_TODO_PATTERNS = (
-    re.compile(r"(?:^|\n)\s*[-*]\s*\[( |x|X)\]\s*(?P<body>.+?)(?:\n|$)"),
-    re.compile(r"(?:TODO|Todo|todo|待办|下一步|需要|待补充|待验证|补一个|补充)\s*[:：]?\s*(?P<body>.+?)(?:\n|$)"),
-)
+#: 只有「列表项 / 复选框 / 显式待办前缀行」才参与待办抽取。
+#: 曾用正则在整句正文里匹配「需要 / 下一步」等关键词，会把半句话（碎片）抠成待办，
+#: 因此改为先判断行的形态，再提取正文；普通正文行直接跳过。
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+_CHECKBOX_RE = re.compile(r"^\s*[-*+]\s*\[(?: |x|X)\]\s*")
+_TODO_PREFIX_RE = re.compile(r"^(?:TODO|Todo|todo|待办|下一步|待补充|待验证|待确认)\s*[:：]?\s*")
 
 
 class Corpus:
@@ -137,31 +139,34 @@ class Corpus:
         return rows
 
     def scan_todos(self) -> list[TodoItem]:
-        """扫描所有文档中的 TODO / 待办线索。"""
+        """扫描所有文档中的待办线索。
+
+        只从「列表项 / 复选框 / 显式待办前缀行」抽取：普通正文行即使包含
+        「需要 / 下一步」等词也不再抽取，避免把半句话当成待办。
+        """
         items: list[TodoItem] = []
         seen: set[str] = set()
         for doc in self.documents.values():
             for line in doc.text.splitlines():
-                for pattern in _TODO_PATTERNS:
-                    match = pattern.search(line)
-                    if not match:
-                        continue
-                    body = _clean(match.group("body"))
-                    if len(body) < 4:
-                        continue
-                    key = body.lower()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    items.append(
-                        TodoItem(
-                            text=body,
-                            doc_id=doc.doc_id,
-                            date=str(doc.meta.get("date", "")),
-                            owner=str(doc.meta.get("author", "")),
-                            status=_todo_status(line),
-                        )
+                body_raw = _todo_candidate(line)
+                if body_raw is None:
+                    continue
+                body = _clean(body_raw)
+                if len(body) < 4:
+                    continue
+                key = body.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                items.append(
+                    TodoItem(
+                        text=body,
+                        doc_id=doc.doc_id,
+                        date=str(doc.meta.get("date", "")),
+                        owner=str(doc.meta.get("author", "")),
+                        status=_todo_status(line),
                     )
+                )
         return items
 
     def stats(self) -> dict[str, Any]:
@@ -175,6 +180,29 @@ class Corpus:
             "by_kind": by_kind,
             "todos": len(self.scan_todos()),
         }
+
+
+def _todo_candidate(line: str) -> str | None:
+    """判断某行是否属于待办候选；是则返回去掉列表标记 / 显式前缀后的正文，否则返回 ``None``。
+
+    仅接受三种形态：复选框行、列表项行、以显式待办前缀开头的行；其余行一律跳过。
+    """
+    checkbox = _CHECKBOX_RE.match(line)
+    if checkbox:
+        return line[checkbox.end() :]
+
+    marker = _LIST_MARKER_RE.match(line)
+    if marker:
+        inner = line[marker.end() :]
+    else:
+        stripped = line.strip()
+        prefix = _TODO_PREFIX_RE.match(stripped)
+        if not prefix:
+            return None
+        inner = stripped[prefix.end() :]
+
+    # 列表项里若还带显式前缀（如 "- 下一步：…"），一并去掉，只保留正文。
+    return _TODO_PREFIX_RE.sub("", inner.lstrip())
 
 
 def _clean(text: str) -> str:

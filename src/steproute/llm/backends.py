@@ -22,7 +22,7 @@ import httpx
 from ..config import ModelSpecConfig, Settings
 from ..logging_utils import get_logger
 from ..net import connection_error_message, is_connection_refused
-from ..secrets import SecretsManager, default_manager
+from ..secrets import SecretsManager, default_manager, register_secret
 from .schema import ChatResult, Usage
 
 logger = get_logger(__name__)
@@ -76,7 +76,14 @@ class APIBackend:
     @property
     def api_key(self) -> str:
         if self._api_key is None:
-            self._api_key = self._secrets.get_llm_api_key()
+            # 便捷路径：显式配置（.env / STEPROUTE_LLM_API_KEY）优先。
+            configured = (self.settings.llm_api_key or "").strip()
+            if configured:
+                register_secret(configured)
+                self._api_key = configured
+            else:
+                # 安全路径：环境变量 → 系统凭据管理器 → 加密密钥库。
+                self._api_key = self._secrets.get_llm_api_key()
         return self._api_key
 
     def _client_for(self, endpoint: str) -> httpx.Client:

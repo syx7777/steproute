@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from steproute.config import Settings
+from steproute.llm.backends import APIBackend
 from steproute.secrets import (
     EncryptedVault,
     SecretError,
@@ -91,3 +93,28 @@ def test_status_never_exposes_plaintext() -> None:
     dumped = str(status)
     assert FAKE_KEY not in dumped
     assert status["active_source"] == "env"
+
+
+def test_llm_key_can_come_from_env_file(tmp_path: Path) -> None:
+    """.env 里写了 STEPROUTE_LLM_API_KEY 时，APIBackend 应当直接用它。"""
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"STEPROUTE_LLM_API_KEY={FAKE_KEY}\n", encoding="utf-8")
+    settings = Settings(_env_file=env_file)
+    manager = SecretsManager(vault=EncryptedVault(tmp_path / "none.enc", passphrase="pw"), environ={})
+
+    backend = APIBackend(settings, secrets_manager=manager)
+    assert backend.api_key == FAKE_KEY
+
+
+def test_llm_key_falls_back_to_secret_store(tmp_path: Path) -> None:
+    """Settings 里为空时，仍走 secrets 解析链（keyring / vault / 环境变量）。"""
+    settings = Settings(_env_file=None, llm_api_key="")
+    manager = SecretsManager(environ={"STEPROUTE_LLM_API_KEY": FAKE_KEY})
+
+    backend = APIBackend(settings, secrets_manager=manager)
+    assert backend.api_key == FAKE_KEY
+
+
+def test_settings_repr_hides_llm_key() -> None:
+    settings = Settings(llm_api_key="super-secret-llm-key-123")
+    assert "super-secret-llm-key-123" not in repr(settings)

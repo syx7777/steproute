@@ -1,7 +1,0 @@
-# 评估（路由性能仿真 + 消融）
-seed: 20261008
-num_tasks: 40
-min_steps: 6
-max_steps: 12
-failure_prob_when_underpowered: 0.75
-retry_cost_multiplier: 1.6

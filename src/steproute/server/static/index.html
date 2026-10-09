@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>steproute · 科研助手</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --surface-muted: #f8f9fb;
+    --border: #e6e8ec;
+    --border-strong: #d6d9e0;
+    --text: #1b1f27;
+    --text-2: #5b6472;
+    --text-3: #8b93a1;
+    --brand: #0f9d58;
+    --brand-dark: #0b7d45;
+    --brand-soft: #e9f8f0;
+    --danger: #d64545;
+    --radius: 10px;
+    --radius-lg: 14px;
+    --shadow: 0 1px 2px rgba(20, 26, 40, .04), 0 6px 18px rgba(20, 26, 40, .05);
+    --space: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--text); min-height: 100vh;
+    font: 14px/1.65 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 1px solid var(--border-strong); background: var(--surface);
+    border-radius: var(--radius); padding: 7px 14px; transition: background .12s, border-color .12s, color .12s; }
+  button:hover:not(:disabled) { background: var(--surface-muted); border-color: var(--text-3); }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  button.primary:hover:not(:disabled) { background: var(--brand-dark); border-color: var(--brand-dark); }
+  button.ghost { border-color: transparent; background: transparent; color: var(--text-2); padding: 4px 8px; }
+  button.ghost:hover:not(:disabled) { background: var(--surface-muted); border-color: var(--border); }
+  button.danger:hover:not(:disabled) { color: var(--danger); }
+  input[type=text], input[type=date], select, textarea {
+    padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface);
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand-soft); border-color: var(--brand); }
+
+  header.app { position: sticky; top: 0; z-index: 10; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .bar { max-width: 1280px; margin: 0 auto; padding: 14px 24px 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .brand { font-weight: 600; font-size: 16px; letter-spacing: .2px; }
+  .brand span { color: var(--brand); }
+  .spacer { flex: 1; }
+  .chip { font-size: 12px; color: var(--text-2); background: var(--surface-muted);
+    border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; }
+  .status { font-size: 12px; color: var(--text-3); min-height: 18px; }
+  .status.err { color: var(--danger); }
+
+  nav.tabs { max-width: 1280px; margin: 0 auto; padding: 10px 24px 0; display: flex; gap: 4px; }
+  nav.tabs button { border: 1px solid transparent; border-bottom: none; background: transparent; color: var(--text-2);
+    border-radius: var(--radius) var(--radius) 0 0; padding: 9px 18px; font-weight: 500; }
+  nav.tabs button[aria-selected="true"] { background: var(--bg); border-color: var(--border); color: var(--text); font-weight: 600; }
+  nav.tabs button:hover { color: var(--text); }
+
+  main { max-width: 1280px; margin: 0 auto; padding: 20px 24px 64px; }
+  .panel[hidden] { display: none; }
+  .grid { display: grid; gap: var(--space); grid-template-columns: repeat(12, 1fr); align-items: start; }
+  .col-4 { grid-column: span 4; } .col-5 { grid-column: span 5; } .col-6 { grid-column: span 6; }
+  .col-7 { grid-column: span 7; } .col-8 { grid-column: span 8; } .col-12 { grid-column: span 12; }
+  @media (max-width: 980px) { .col-4, .col-5, .col-6, .col-7, .col-8 { grid-column: span 12; } }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 18px 20px; box-shadow: var(--shadow); margin-bottom: var(--space); }
+  .card > h2 { font-size: 14px; font-weight: 600; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+  .card > h2 .count { font-size: 12px; font-weight: 500; color: var(--text-2); background: var(--surface-muted);
+    border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; }
+  .hint { color: var(--text-3); font-size: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  .md { font-size: 14px; }
+  .md h1 { font-size: 17px; margin: 0 0 8px; } .md h2 { font-size: 14px; margin: 16px 0 6px; color: var(--brand-dark); }
+  .md h3 { font-size: 13px; margin: 12px 0 4px; } .md p { margin: 6px 0; }
+  .md ul { margin: 6px 0; padding-left: 20px; } .md li { margin: 3px 0; }
+  .md blockquote { margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--border-strong); color: var(--text-2); }
+
+  ul.todos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  ul.todos li { display: flex; align-items: flex-start; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--border); }
+  ul.todos li:last-child { border-bottom: none; }
+  ul.todos li.done .todo-text { color: var(--text-3); text-decoration: line-through; }
+  .todo-text { flex: 1; word-break: break-word; }
+  .todo-meta { font-size: 12px; color: var(--text-3); }
+  .tag { font-size: 11px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; color: var(--text-3); white-space: nowrap; }
+  .tag.manual { color: var(--brand-dark); border-color: var(--brand); background: var(--brand-soft); }
+  input[type=checkbox] { width: 16px; height: 16px; margin-top: 3px; accent-color: var(--brand); flex: none; }
+  .add-form { display: flex; gap: 8px; margin-bottom: 6px; }
+  .add-form input { flex: 1; min-width: 120px; }
+
+  .kv { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; }
+  .kv div { font-size: 12px; color: var(--text-3); }
+  .kv b { display: block; font-size: 18px; color: var(--text); font-weight: 600; }
+  .list { margin: 0; padding: 0; list-style: none; }
+  .list li { padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+  .list li:last-child { border-bottom: none; }
+  .list .date { color: var(--text-3); font-size: 12px; margin-right: 6px; }
+
+  textarea { width: 100%; min-height: 260px; resize: vertical; line-height: 1.7; }
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .field label { font-size: 12px; color: var(--text-2); }
+  .empty { color: var(--text-3); font-size: 13px; padding: 8px 0; }
+</style>
+</head>
+<body>
+<header class="app">
+  <div class="bar">
+    <div class="brand">step<span>route</span> · 科研助手</div>
+    <span class="chip" id="weekChip">—</span>
+    <div class="spacer"></div>
+    <label class="row hint">日期 <input type="date" id="day" /></label>
+    <button id="refresh">刷新</button>
+    <span class="status" id="status"></span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="workbench" aria-selected="true">工作台</button>
+    <button role="tab" data-tab="minutes" aria-selected="false">组会纪要</button>
+    <button role="tab" data-tab="weekly" aria-selected="false">周报</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ============ 工作台 ============ -->
+  <section class="panel" id="panel-workbench">
+    <div class="card">
+      <h2>知识库</h2>
+      <div class="row">
+        <select id="kbSelect"></select>
+        <button class="primary" id="kbRefresh">从该知识库拉取更新</button>
+        <label class="row hint"><input type="checkbox" id="kbDistill" checked /> 同时提炼长期记忆</label>
+        <div class="spacer"></div>
+        <button class="ghost" id="distillOnly">只提炼，不拉取</button>
+      </div>
+      <div class="hint" style="margin-top:8px">
+        拉取会把该知识库的文档增量同步到本地；勾选「提炼」时，会用模型把文档归纳成项目状态 / 决策 / 经验写入长期记忆，并归纳简报的待办与项目进展（未配置 LLM 时自动回退为规则抽取）。
+        下方的简报与待办也只统计**当前选中的知识库**。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>每日工作简报</h2>
+      <div class="md" id="brief">加载中…</div>
+    </div>
+
+    <div class="grid">
+      <div class="card col-8">
+        <h2>待办清单 <span class="count" id="todoCount">—</span> <span class="hint" id="todoCandidateNote"></span></h2>
+        <div class="add-form">
+          <input type="text" id="todoText" placeholder="新增待办，回车即可添加…" />
+          <input type="text" id="todoOwner" placeholder="负责人（可选）" style="max-width:130px" />
+          <button class="primary" id="todoAdd">添加</button>
+        </div>
+        <div class="row" style="margin-bottom:6px">
+          <button class="primary" id="todoSummarize">用 LLM 归纳待办</button>
+          <span class="hint">归纳会用模型合并重复项、去掉碎片（显示上限 10 条，手动待办不受限）。文档待办只取本周更新过的文档。</span>
+        </div>
+        <div class="hint" style="margin-bottom:6px">手动待办在前，文档待办按日期倒序；最多展示 10 条。全部可勾选 / 编辑 / 删除。</div>
+        <ul class="todos" id="todoList"></ul>
+        <div class="row" style="margin-top:8px">
+          <button class="ghost" id="candidateToggle" hidden>全部候选（0 条）</button>
+        </div>
+        <ul class="todos" id="candidateList" hidden></ul>
+      </div>
+
+      <div class="card col-4">
+        <h2>项目长期记忆</h2>
+        <div class="kv" id="memStats"></div>
+        <div id="memBody"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 组会纪要 ============ -->
+  <section class="panel" id="panel-minutes" hidden>
+    <div class="grid">
+      <div class="card col-7">
+        <h2>粘贴组会纪要</h2>
+        <div class="field">
+          <label>正文（支持 Markdown；「结论 / 决定」会抽成决策，「下一步 / 待办」会抽成待办）</label>
+          <textarea id="minText" placeholder="# 组会纪要&#10;&#10;- 结论：本轮对比不公平，需先对齐配置。&#10;- 下一步：统一抽帧数后重跑一轮。"></textarea>
+        </div>
+        <div class="row">
+          <input type="text" id="minTitle" placeholder="标题（可选）" />
+          <input type="text" id="minAuthor" placeholder="作者（可选）" />
+          <button class="primary" id="minSubmit">解析并导入</button>
+        </div>
+      </div>
+      <div class="card col-5">
+        <h2>抽取结果</h2>
+        <div id="minResult" class="empty">导入后会显示识别出的决策与待办。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 周报 ============ -->
+  <section class="panel" id="panel-weekly" hidden>
+    <div class="card">
+      <h2>周报 <span class="count" id="weekTitle">—</span></h2>
+      <div class="row" style="margin-bottom:12px">
+        <span class="hint">写入知识库（固定）</span>
+        <span class="chip" id="weeklySpace">—</span>
+        <div class="spacer"></div>
+        <button id="weeklyReload">刷新预览</button>
+        <button class="primary" id="weeklyPublish">发布到飞书</button>
+      </div>
+      <div class="md" id="weekly">加载中…</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+let TODOS = [];
+let CANDIDATES = [];
+let SUMMARY = null;
+let KB_LIST = [];
+
+const setStatus = (text, isError) => {
+  statusEl.textContent = text || "";
+  statusEl.className = "status" + (isError ? " err" : "");
+};
+const esc = (value) => String(value ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const currentSpace = () => $("kbSelect").value || "";
+const todoUrl = (scope, id) => `/api/todos/${scope}/${encodeURIComponent(id)}`;
+
+/** 极简 Markdown 渲染 */
+function mdToHtml(md) {
+  const out = [];
+  let inList = false;
+  const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+  for (const raw of String(md || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    let m;
+    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+      closeList(); out.push(`<h${Math.min(m[1].length, 3)}>${inline(m[2])}</h${Math.min(m[1].length, 3)}>`);
+    } else if ((m = line.match(/^[-*]\s*\[( |x|X)\]\s*(.*)$/))) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${m[1].toLowerCase() === "x" ? "☑" : "☐"} ${inline(m[2])}</li>`);
+    } else if ((m = line.match(/^[-*]\s+(.*)$/))) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${inline(m[1])}</li>`);
+    } else if ((m = line.match(/^>\s?(.*)$/))) {
+      closeList(); out.push(`<blockquote>${inline(m[1])}</blockquote>`);
+    } else {
+      closeList(); out.push(`<p>${inline(line)}</p>`);
+    }
+  }
+  closeList();
+  return out.join("");
+}
+const inline = (text) => esc(text).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || `请求失败（HTTP ${res.status}）`);
+  return body;
+}
+const send = (path, payload, method = "POST") => api(path, {
+  method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload ?? {}),
+});
+
+/* ---------------------------- 渲染 ---------------------------- */
+
+function renderTodos(payload) {
+  TODOS = payload.todos || [];
+  if (Array.isArray(payload.candidate_todos)) CANDIDATES = payload.candidate_todos;
+  const stats = payload.stats || {};
+  $("todoCount").textContent = `${stats.open ?? 0} 待完成 / 共 ${stats.total ?? 0} 条`;
+  renderCandidateNote();
+
+  if (!TODOS.length) {
+    $("todoList").innerHTML = currentSpace()
+      ? '<li class="empty">当前知识库还没有待办。可点上方「从该知识库拉取更新」，或直接在上方新增。</li>'
+      : '<li class="empty">暂无待办。</li>';
+  } else {
+    $("todoList").innerHTML = TODOS.map((todo) => {
+      const done = todo.status === "done";
+      const scope = todo.source === "manual" ? "manual" : "corpus";
+      const meta = [todo.owner ? `负责人：${esc(todo.owner)}` : "", todo.due ? `截止：${esc(todo.due)}` : "",
+        scope === "corpus" ? `来自 ${esc(todo.doc_id)}` : ""].filter(Boolean).join(" · ");
+      return `<li class="${done ? "done" : ""}" data-id="${esc(todo.id)}" data-scope="${scope}">
+        <input type="checkbox" data-act="toggle" data-id="${esc(todo.id)}" data-scope="${scope}" ${done ? "checked" : ""} />
+        <span class="todo-text">${esc(todo.text)}${meta ? `<div class="todo-meta">${meta}</div>` : ""}</span>
+        <span class="tag ${scope === "manual" ? "manual" : ""}">${scope === "manual" ? "手动" : "文档"}</span>
+        <button class="ghost" data-act="edit" data-id="${esc(todo.id)}" data-scope="${scope}">编辑</button>
+        <button class="ghost danger" data-act="delete" data-id="${esc(todo.id)}" data-scope="${scope}">删除</button>
+      </li>`;
+    }).join("");
+  }
+  renderCandidates();
+}
+
+/** 标题旁显示本次归纳的素材与结果 + 归纳方式——让用户知道读了几篇文档、归纳出几条、这次用没用模型。 */
+function renderCandidateNote() {
+  const note = $("todoCandidateNote");
+  const method = SUMMARY ? SUMMARY.method : "";
+  // LLM 模式直读本周文档正文：素材是「文档篇数」，不是正则候选条数（候选可能为 0）。
+  if (method === "llm") {
+    const docs = SUMMARY.docs || 0;
+    note.innerHTML = `本周 ${docs} 篇文档 · 已归纳为 ${TODOS.length} 条待办 ` +
+      `<span class="tag manual">· 已用 LLM 归纳</span>`;
+    note.hidden = false;
+    return;
+  }
+  if (method === "rules") {
+    note.innerHTML = `本周候选 ${CANDIDATES.length} 条 · 按规则兜底 ` +
+      `<span class="hint">${esc(SUMMARY.note || "未说明原因")}</span>`;
+    note.hidden = false;
+    return;
+  }
+  if (!CANDIDATES.length) { note.textContent = ""; note.hidden = true; return; }
+  note.textContent = `共 ${CANDIDATES.length} 条候选`;
+  note.hidden = false;
+}
+
+/** 可折叠的「全部候选」区域：列出未被选中的候选，可一键加入待办。 */
+function renderCandidates() {
+  const btn = $("candidateToggle");
+  const list = $("candidateList");
+  btn.hidden = CANDIDATES.length === 0;
+  btn.textContent = `全部候选（${CANDIDATES.length} 条）`;
+  if (!CANDIDATES.length) { list.hidden = true; list.innerHTML = ""; return; }
+
+  const selected = new Set(TODOS.map((todo) => String(todo.text || "").trim()));
+  const rest = CANDIDATES.filter((candidate) => !selected.has(String(candidate.text || "").trim()));
+  list.innerHTML = rest.length
+    ? rest.map((candidate) => `<li data-key="${esc(candidate.key)}">
+        <span class="todo-text">${esc(candidate.text)}${candidate.doc_id ? `<div class="todo-meta">来自 ${esc(candidate.doc_id)}</div>` : ""}</span>
+        <button class="ghost" data-act="promote" data-text="${esc(candidate.text)}">加入待办</button>
+      </li>`).join("")
+    : '<li class="empty">候选都已显示在待办列表中。</li>';
+}
+
+function renderMemory(memory) {
+  const stats = memory.stats || {};
+  $("memStats").innerHTML = `
+    <div><b>${stats.projects ?? 0}</b>项目</div>
+    <div><b>${stats.decisions ?? 0}</b>决策</div>
+    <div><b>${stats.lessons ?? 0}</b>经验</div>`;
+  const block = (title, items, fmt) => items.length
+    ? `<h3 style="font-size:12px;color:var(--text-2);margin:12px 0 4px">${title}</h3><ul class="list">${items.map(fmt).join("")}</ul>`
+    : "";
+  const html =
+    block("项目状态", memory.projects || [], (p) => `<li><b>${esc(p.project)}</b>
+        <span class="todo-meta">${esc([p.status, p.stage, p.goal].filter(Boolean).join(" · "))}</span></li>`) +
+    block("最近决策", (memory.decisions || []).slice(-6).reverse(), (d) => `<li><span class="date">${esc(d.date)}</span>${esc(d.text)}</li>`) +
+    block("实验经验", (memory.lessons || []).slice(-6).reverse(), (l) => `<li><span class="date">${esc(l.date)}</span>${esc(l.text)}</li>`);
+  $("memBody").innerHTML = html ||
+    '<div class="empty">还没有长期记忆。勾选上方「同时提炼长期记忆」后拉取知识库，或用 <code>steproute memory state/decision/lesson</code> 录入。</div>';
+}
+
+function renderKnowledgeBases(list, weeklySpaceId) {
+  KB_LIST = list || [];
+  if ($("kbSelect").options.length !== KB_LIST.length) {
+    $("kbSelect").innerHTML = KB_LIST.map((kb) => `<option value="${esc(kb.space_id)}">${esc(kb.name)}</option>`).join("");
+  }
+  const saved = localStorage.getItem("kb_space");
+  if (saved && KB_LIST.some((kb) => kb.space_id === saved)) $("kbSelect").value = saved;
+  $("weeklySpace").textContent = weeklySpaceId || "—";
+}
+
+function renderDashboard(data) {
+  SUMMARY = data.summary || null;
+  if (Array.isArray(data.candidate_todos)) CANDIDATES = data.candidate_todos;
+  $("brief").innerHTML = mdToHtml(data.brief.markdown);
+  renderTodos({ todos: data.todos, stats: data.todo_stats, candidate_todos: CANDIDATES });
+  renderMemory(data.memory);
+  if (data.weekly) { $("weekChip").textContent = data.weekly.label.title; $("weekTitle").textContent = data.weekly.label.title; $("weekly").innerHTML = mdToHtml(data.weekly.markdown); }
+  renderKnowledgeBases(data.knowledge_bases, data.weekly_space_id);
+  if (!$("day").value) $("day").value = data.date;
+}
+
+/* ---------------------------- 加载 ---------------------------- */
+
+async function load() {
+  setStatus("加载中…");
+  try {
+    const params = new URLSearchParams();
+    if ($("day").value) params.set("day", $("day").value);
+    // 始终限定在某一个知识库：优先下拉当前值，兜底列表第一项，避免"全量"。
+    const space = currentSpace() || (KB_LIST[0] ? KB_LIST[0].space_id : "");
+    if (space) params.set("space", space);
+    renderDashboard(await api(`/api/dashboard?${params}`));
+    setStatus(`已更新 ${new Date().toLocaleTimeString()}`);
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
+
+async function reloadTodos() {
+  const params = new URLSearchParams({ space: currentSpace() || (KB_LIST[0] ? KB_LIST[0].space_id : "") });
+  if ($("day").value) params.set("day", $("day").value);
+  const items = await api(`/api/todos?${params}`);
+  renderTodos(items);
+}
+
+/* ---------------------------- 事件 ---------------------------- */
+
+document.querySelectorAll("nav.tabs button").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll("nav.tabs button").forEach((btn) => btn.setAttribute("aria-selected", String(btn === tab)));
+    document.querySelectorAll(".panel").forEach((panel) => { panel.hidden = panel.id !== `panel-${tab.dataset.tab}`; });
+  });
+});
+
+$("refresh").addEventListener("click", load);
+$("day").addEventListener("change", load);
+$("kbSelect").addEventListener("change", (e) => { localStorage.setItem("kb_space", e.target.value); load(); });
+
+async function runDistill(report) {
+  const result = await send("/api/memory/distill", { space_id: currentSpace() });
+  if (result.dashboard) renderDashboard(result.dashboard);
+  report(result);
+}
+
+$("kbRefresh").addEventListener("click", async () => {
+  const spaceId = currentSpace();
+  if (!spaceId) { setStatus("请先选择知识库", true); return; }
+  $("kbRefresh").disabled = true;
+  setStatus("正在从知识库拉取更新…");
+  try {
+    const data = await send("/api/brief/refresh", {
+      space_id: spaceId, day: $("day").value, distill: $("kbDistill").checked,
+    });
+    renderDashboard(data);
+    const sync = data.sync || {};
+    let message = `${data.space_name || spaceId}：写入 ${sync.written ?? 0} 篇，跳过 ${sync.skipped ?? 0} 篇`;
+    if (data.distill) {
+      const d = data.distill;
+      message += d.method === "llm"
+        ? `；已提炼「${d.project || "项目"}」（决策 ${d.decisions.length} / 经验 ${d.lessons.length}）`
+        : `；${d.note || "未提炼"}`;
+    }
+    setStatus(message);
+  } catch (err) {
+    setStatus(`拉取失败：${err.message}`, true);
+  } finally {
+    $("kbRefresh").disabled = false;
+  }
+});
+
+$("distillOnly").addEventListener("click", async () => {
+  $("distillOnly").disabled = true;
+  setStatus("正在提炼长期记忆…");
+  try {
+    await runDistill((result) => setStatus(
+      result.method === "llm"
+        ? `已提炼「${result.project || "项目"}」：决策 ${result.decisions.length} / 经验 ${result.lessons.length}`
+        : (result.note || "未提炼")
+    ));
+  } catch (err) {
+    setStatus(`提炼失败：${err.message}`, true);
+  } finally {
+    $("distillOnly").disabled = false;
+  }
+});
+
+$("todoAdd").addEventListener("click", addTodo);
+$("todoText").addEventListener("keydown", (e) => { if (e.key === "Enter") addTodo(); });
+
+$("candidateToggle").addEventListener("click", () => {
+  const list = $("candidateList");
+  list.hidden = !list.hidden;
+});
+
+$("candidateList").addEventListener("click", async (event) => {
+  const target = event.target.closest('[data-act="promote"]');
+  if (!target) return;
+  try {
+    await send("/api/todos", { text: target.dataset.text, space_id: currentSpace() });  // 复用创建手动待办接口
+    await load();  // 全量刷新：候选 / 计数 / 待办一起更新
+    setStatus("已加入待办");
+  } catch (err) { setStatus(err.message, true); }
+});
+
+$("todoSummarize").addEventListener("click", async () => {
+  $("todoSummarize").disabled = true;
+  setStatus("正在用模型归纳待办…");
+  try {
+    const result = await send("/api/brief/summarize", { space_id: currentSpace(), day: $("day").value });
+    if (result.dashboard) renderDashboard(result.dashboard);
+    setStatus(result.method === "llm"
+      ? `已归纳为 ${result.todos.length} 条待办`
+      : (result.note || "未启用 LLM，按规则归纳"));
+  } catch (err) {
+    setStatus(`归纳失败：${err.message}`, true);
+  } finally {
+    $("todoSummarize").disabled = false;
+  }
+});
+
+async function addTodo() {
+  const text = $("todoText").value.trim();
+  if (!text) { setStatus("请输入待办内容", true); return; }
+  try {
+    await send("/api/todos", { text, owner: $("todoOwner").value.trim(), space_id: currentSpace() });
+    $("todoText").value = ""; $("todoOwner").value = "";
+    await reloadTodos();
+    setStatus("已添加待办");
+  } catch (err) { setStatus(err.message, true); }
+}
+
+$("todoList").addEventListener("click", async (event) => {
+  const target = event.target.closest("[data-act]");
+  if (!target) return;
+  const { act, id, scope } = target.dataset;
+  try {
+    if (act === "edit") {
+      startEdit(id, scope);
+    } else if (act === "delete") {
+      if (!confirm("确认删除该待办？")) return;
+      await api(todoUrl(scope, id), { method: "DELETE" });
+      await reloadTodos();
+      setStatus(scope === "corpus" ? "已隐藏该文档待办（源文档未改动）" : "已删除");
+    } else if (act === "save") {
+      const row = target.closest("li");
+      await send(todoUrl(scope, id), {
+        text: row.querySelector(".edit-input").value.trim(),
+        owner: row.querySelector(".edit-owner").value.trim(),
+      }, "PUT");
+      await reloadTodos();
+      setStatus("已保存");
+    } else if (act === "cancel") {
+      await reloadTodos();
+    }
+  } catch (err) { setStatus(err.message, true); }
+});
+
+$("todoList").addEventListener("change", async (event) => {
+  const box = event.target.closest('input[data-act="toggle"]');
+  if (!box) return;
+  try {
+    await send(todoUrl(box.dataset.scope, box.dataset.id), { status: box.checked ? "done" : "open" }, "PUT");
+    await reloadTodos();
+    setStatus(box.checked ? "已标记完成" : "已恢复待完成");
+  } catch (err) { setStatus(err.message, true); }
+});
+
+function startEdit(todoId, scope) {
+  const todo = TODOS.find((item) => item.id === todoId);
+  const row = $("todoList").querySelector(`li[data-id="${todoId}"]`);
+  if (!todo || !row) return;
+  row.innerHTML = `
+    <input type="text" class="edit-input" value="${esc(todo.text)}" style="flex:1" />
+    <input type="text" class="edit-owner" value="${esc(todo.owner)}" placeholder="负责人" style="max-width:120px" />
+    <button class="primary" data-act="save" data-id="${esc(todoId)}" data-scope="${scope}">保存</button>
+    <button class="ghost" data-act="cancel" data-id="${esc(todoId)}" data-scope="${scope}">取消</button>`;
+  row.querySelector(".edit-input").focus();
+}
+
+$("minSubmit").addEventListener("click", async () => {
+  const text = $("minText").value.trim();
+  if (!text) { setStatus("请先粘贴纪要内容", true); return; }
+  setStatus("解析中…");
+  try {
+    const result = await send("/api/minutes", {
+      text, title: $("minTitle").value, author: $("minAuthor").value, date: $("day").value,
+    });
+    $("minResult").innerHTML =
+      `<div class="hint">已导入 <code>${esc(result.doc_id)}</code>（${esc(result.day)}）</div>
+       <h3 style="font-size:12px;margin:12px 0 4px">决策 ${result.decisions.length} 条</h3>
+       <ul class="list">${result.decisions.map((d) => `<li>${esc(d)}</li>`).join("") || "<li class='empty'>无</li>"}</ul>
+       <h3 style="font-size:12px;margin:12px 0 4px">待办 ${result.todos.length} 条</h3>
+       <ul class="list">${result.todos.map((t) => `<li>${esc(t)}</li>`).join("") || "<li class='empty'>无</li>"}</ul>`;
+    setStatus("纪要已导入，已同步到待办与长期记忆");
+    await load();
+  } catch (err) { setStatus(err.message, true); }
+});
+
+$("weeklyReload").addEventListener("click", async () => {
+  try {
+    const weekly = await api(`/api/weekly${$("day").value ? `?day=${$("day").value}` : ""}`);
+    $("weekChip").textContent = weekly.label.title;
+    $("weekTitle").textContent = weekly.label.title;
+    $("weekly").innerHTML = mdToHtml(weekly.markdown);
+    setStatus("周报预览已刷新");
+  } catch (err) { setStatus(err.message, true); }
+});
+
+$("weeklyPublish").addEventListener("click", async () => {
+  $("weeklyPublish").disabled = true;
+  setStatus("正在发布周报…");
+  try {
+    const result = await send("/api/weekly/publish", { date: $("day").value });
+    const link = result.url ? ` · <a href="${esc(result.url)}" target="_blank">打开文档</a>` : "";
+    setStatus("");
+    $("weekly").insertAdjacentHTML("afterbegin",
+      `<p><span class="tag manual">已发布</span> ${esc(result.title)}（${result.blocks} 个块）${link}</p>`);
+  } catch (err) {
+    setStatus(`发布失败：${err.message}`, true);
+  } finally {
+    $("weeklyPublish").disabled = false;
+  }
+});
+
+/** 启动顺序：先取知识库列表并渲染下拉（含 localStorage 记住的选择），再加载数据。
+ *  否则首次打开时下拉为空 → 请求不带 space → 会拿到「所有知识库」的全量数据。 */
+async function bootstrap() {
+  try {
+    const kb = await api("/api/knowledge-bases");
+    renderKnowledgeBases(kb.knowledge_bases, kb.weekly_space_id);
+  } catch (err) {
+    setStatus(`知识库列表加载失败：${err.message}`, true);
+  }
+  await load();
+}
+
+bootstrap();
+</script>
+</body>
+</html>

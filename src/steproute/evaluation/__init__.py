@@ -1,4 +1,4 @@
-"""评估子包：路由性能仿真、质量评分与策略对比 / 消融实验。"""
+"""评估子包：报告质量评分（rubric）。"""
 
 from __future__ import annotations
 
