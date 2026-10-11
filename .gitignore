@@ -17,8 +17,8 @@ configs/knowledge_bases.yaml
 # data/ 可能包含同步来的真实周报 / 会议纪要，整体忽略。
 artifacts/
 data/
-*.jsonl
-!tests/**/*.jsonl
+# tests/ 为本地开发者自用，不随仓库发布。
+tests/
 .venv/
 __pycache__/
 *.py[cod]

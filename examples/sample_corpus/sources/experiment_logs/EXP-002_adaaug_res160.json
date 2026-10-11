@@ -1,0 +1,23 @@
+{
+  "experiment_id": "EXP-002",
+  "name": "adaaug_res160",
+  "date": "2026-03-11",
+  "author": "示例作者",
+  "status": "done",
+  "config": {
+    "backbone": "resnet50",
+    "resolution": 160,
+    "augment": "adaaug",
+    "train_data": "DemoSet-1k/train-subset",
+    "epochs": 10,
+    "batch_size": 32,
+    "seed": 42,
+    "eval_split": "DemoSet-1k/val"
+  },
+  "metrics": {
+    "top1_acc": 78.5,
+    "latency_ms": 21,
+    "params_m": 25.6
+  },
+  "notes": "自适应增强 AdaAug，但输入分辨率 160、训练集为子集，与 baseline 的 224 / 完整训练集不一致，指标不可直接比较。"
+}

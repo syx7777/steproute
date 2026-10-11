@@ -1,0 +1,23 @@
+{
+  "experiment_id": "EXP-004",
+  "name": "ablation_no_aug",
+  "date": "2026-03-25",
+  "author": "示例作者",
+  "status": "done",
+  "config": {
+    "backbone": "resnet50",
+    "resolution": 224,
+    "augment": "none",
+    "train_data": "DemoSet-1k/train",
+    "epochs": 10,
+    "batch_size": 32,
+    "seed": 42,
+    "eval_split": "DemoSet-1k/val"
+  },
+  "metrics": {
+    "top1_acc": 79.4,
+    "latency_ms": 38,
+    "params_m": 21.0
+  },
+  "notes": "消融：去掉自适应增强模块，其余配置与 EXP-003 一致。准确率下降 1.8 个点，说明增强模块是主要增益来源。"
+}

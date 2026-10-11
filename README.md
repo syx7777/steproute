@@ -83,7 +83,7 @@ steproute/
 │   ├── routing/             # 特征 / 判档 / 调度器 / 缓存追踪
 │   ├── assistant/           # 简报 / 待办 / 长期记忆 / 周报
 │   └── server/              # FastAPI 后端 + 单页前端
-└── tests/                   # 离线测试 + 示例语料（tests/fixtures/sample_corpus）
+└── examples/                # 示例语料（纯虚构数据，可直接试跑）
 ```
 
 ---
@@ -122,20 +122,19 @@ cd steproute
 uv sync                  # 核心依赖（跑 Agent / CLI）
 uv sync --extra server   # 额外装 fastapi、uvicorn（用可视化网站）
 uv sync --extra ui       # 额外装 gradio（用 Web UI）
-uv sync --extra dev      # 额外装 pytest（跑测试）
 ```
 
 > 只跑通流程，`uv sync` 就够了；要用网站再加 `--extra server`。
 
 ### 3. 跑通离线示例（验证部署成功 ✅）
 
-项目自带一份示例语料（在 `tests/fixtures/sample_corpus/`）。因为它不在默认的 `data/` 目录下，所以命令里要显式加 `--data-dir`：
+项目自带一份示例语料（在 `examples/sample_corpus/`，纯虚构数据）。因为它不在默认的 `data/` 目录下，所以命令里要显式加 `--data-dir`：
 
 ```powershell
-uv run steproute version                                       # 应输出：steproute 1.0.0
-uv run steproute ingest  --data-dir tests/fixtures/sample_corpus    # 看语料加载结果
-uv run steproute search "公平对比 抽帧数 分辨率" --data-dir tests/fixtures/sample_corpus  # 验证检索
-uv run steproute run --backend sim --data-dir tests/fixtures/sample_corpus               # 离线跑完整 Agent
+uv run steproute version                                        # 应输出：steproute 1.0.0
+uv run steproute ingest  --data-dir examples/sample_corpus      # 看语料加载结果
+uv run steproute search "baseline 对比 公平" --data-dir examples/sample_corpus   # 验证检索
+uv run steproute run --backend sim --data-dir examples/sample_corpus             # 离线跑完整 Agent
 ```
 
 `run` 最后会打印一段结果，看到下面这样就说明**部署成功**：
@@ -223,12 +222,12 @@ Copy-Item configs/knowledge_bases.example.yaml configs/knowledge_bases.yaml
 
 ### 离线体验（不花钱、不联网）
 
-把 `--data-dir tests/fixtures/sample_corpus` 换成你自己的语料目录，就是真实数据了。
+把 `--data-dir examples/sample_corpus` 换成你自己的语料目录，就是真实数据了。
 
 ```powershell
-uv run steproute ingest --data-dir tests/fixtures/sample_corpus
-uv run steproute search "公平对比 抽帧数 分辨率" --data-dir tests/fixtures/sample_corpus
-uv run steproute run --backend sim --data-dir tests/fixtures/sample_corpus
+uv run steproute ingest --data-dir examples/sample_corpus
+uv run steproute search "baseline 对比 公平" --data-dir examples/sample_corpus
+uv run steproute run --backend sim --data-dir examples/sample_corpus
 ```
 
 ### 真实调用
@@ -248,7 +247,7 @@ uv run steproute evaluate --backend api                     # 跑一次并给报
 uv sync --extra server
 uv run steproute serve                    # 打开 http://127.0.0.1:8000
 # 想快速看界面，直接用示例语料启动：
-uv run steproute serve --data-dir tests/fixtures/sample_corpus
+uv run steproute serve --data-dir examples/sample_corpus
 ```
 
 网站有两个页签：**工作台**（选知识库、每日简报、待办清单、项目长期记忆）和**周报**（预览、生成、发布到飞书）。
@@ -303,13 +302,6 @@ uv run steproute weekly publish --space "<target_space_id>"
 - `weekly_reports/`、`meeting_minutes/`：`.md` 或 `.txt`，可选 YAML 头部 `title` / `date` / `author`；
 - `experiment_logs/`：`.json`，字段 `experiment_id` / `name` / `config` / `metrics` / `notes`；
 - `repo/`：任意 `.md` 或 `.json`。
-
-## 🧪 测试
-
-```powershell
-uv run pytest -q            # 全部离线：不联网、不需要 API Key
-uvx ruff check src tests    # 静态检查（uvx 会临时拉取 ruff）
-```
 
 ## 📄 许可
 

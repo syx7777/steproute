@@ -1,0 +1,23 @@
+{
+  "experiment_id": "EXP-003",
+  "name": "adaaug_res224_aligned",
+  "date": "2026-03-18",
+  "author": "示例作者",
+  "status": "done",
+  "config": {
+    "backbone": "resnet50",
+    "resolution": 224,
+    "augment": "adaaug",
+    "train_data": "DemoSet-1k/train",
+    "epochs": 10,
+    "batch_size": 32,
+    "seed": 42,
+    "eval_split": "DemoSet-1k/val"
+  },
+  "metrics": {
+    "top1_acc": 81.2,
+    "latency_ms": 40,
+    "params_m": 25.9
+  },
+  "notes": "与 EXP-001 配置对齐（同骨干、同分辨率、同训练集、同种子、同评测切分），唯一差异是增强方式 augment=adaaug。这是本项目唯一公平的主对比实验。"
+}
