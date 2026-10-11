@@ -14,14 +14,9 @@ steproute_secrets.json.enc
 configs/knowledge_bases.yaml
 
 # ---- 运行时产物 / 私人数据（不入库）----
+# data/ 可能包含同步来的真实周报 / 会议纪要，整体忽略。
 artifacts/
-data/runs/
-data/sync_state.json
-data/briefs/
-data/memory/
-data/todos.json
-data/brief_summary.json
-data/sources/notes/
+data/
 *.jsonl
 !tests/**/*.jsonl
 .venv/

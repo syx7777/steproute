@@ -380,13 +380,11 @@ def load_app_config(config_dir: Path | str = "configs") -> AppConfig:
 # 知识库（简报页选择器 + 周报固定写入目标）
 # --------------------------------------------------------------------------- #
 
-#: ``configs/knowledge_bases.yaml`` 缺失时的兜底。
-DEFAULT_WEEKLY_SPACE_ID = "7671654639892171748"
+#: ``configs/knowledge_bases.yaml`` 缺失时的兜底（仅占位示例，请按 ``knowledge_bases.example.yaml`` 配置自己的知识库）。
+DEFAULT_WEEKLY_SPACE_ID = "0000000000000000000"
 DEFAULT_KNOWLEDGE_BASES: tuple[tuple[str, str], ...] = (
-    ("实习", "7552806097184784386"),
-    ("风控项目", "7672220327107103924"),
-    ("AI4Phy", "7552812149661057025"),
-    ("自学", "7626974321562389714"),
+    ("项目A", "1111111111111111111"),
+    ("项目B", "2222222222222222222"),
 )
 
 

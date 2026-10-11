@@ -20,9 +20,11 @@ from steproute.server import app as app_module  # noqa: E402
 from steproute.server.app import create_app  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-WEEKLY_SPACE_ID = "7671654639892171748"
-SPACE_ID = "7552806097184784386"  # 实习
-OTHER_SPACE_ID = "7672220327107103924"  # 风控项目
+#: 占位知识库配置（测试自建，避免依赖开发者本地的 configs/knowledge_bases.yaml）。
+KB_NAME = "项目A"
+WEEKLY_SPACE_ID = "0000000000000000000"
+SPACE_ID = "1111111111111111111"  # 项目A
+OTHER_SPACE_ID = "2222222222222222222"  # 项目B
 #: 文档待办只取「本周更新过」的文档，夹具日期用今天以保证落在当前自然周内。
 TODAY = date.today().isoformat()
 
@@ -88,10 +90,27 @@ def _client(tmp_path: Path) -> TestClient:
     settings = Settings(
         _env_file=None,
         data_dir=data,
-        config_dir=PROJECT_ROOT / "configs",
+        config_dir=_write_kb_config(tmp_path),
         log_level="WARNING",
     )
     return TestClient(create_app(settings))
+
+
+def _write_kb_config(tmp_path: Path) -> Path:
+    """在临时目录写一份占位知识库配置，返回可作为 config_dir 的目录。
+
+    其余配置文件（models/jev/scheduler/agent）缺失时会自动回退内置默认值。
+    """
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "knowledge_bases.yaml").write_text(
+        f'weekly_space_id: "{WEEKLY_SPACE_ID}"\n'
+        "knowledge_bases:\n"
+        f'  - {{name: {KB_NAME}, space_id: "{SPACE_ID}"}}\n'
+        f'  - {{name: 项目B, space_id: "{OTHER_SPACE_ID}"}}\n',
+        encoding="utf-8",
+    )
+    return config_dir
 
 
 def test_dashboard_returns_all_sections(tmp_path: Path) -> None:
@@ -133,7 +152,7 @@ def test_dashboard_memory_is_scoped_by_space(tmp_path: Path) -> None:
         # 规则回退进展文案用知识库中文名（space_label=knowledge.name_of(space_id)）
         progress = scoped["brief"]["progress"]
         progress_text = "\n".join(progress) if isinstance(progress, list) else progress
-        assert "实习" in progress_text
+        assert KB_NAME in progress_text  # 规则回退进展文案用知识库中文名（space_label=knowledge.name_of(space_id)）
 
         # 默认不过滤：全部可见
         unscoped = client.get("/api/dashboard").json()
@@ -180,7 +199,7 @@ def test_dashboard_prefers_llm_todos_when_summary_available(tmp_path: Path) -> N
 def test_knowledge_bases_list(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         payload = client.get("/api/knowledge-bases").json()
-    assert [item["name"] for item in payload["knowledge_bases"]] == ["实习", "风控项目", "AI4Phy", "自学"]
+    assert [item["name"] for item in payload["knowledge_bases"]] == [KB_NAME, "项目B"]
     assert payload["weekly_space_id"] == WEEKLY_SPACE_ID
 
 
