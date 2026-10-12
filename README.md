@@ -279,4 +279,4 @@ steproute/
 
 ## 📄 许可
 
-本项目基于 **MIT License** 开源。
+本项目以 **MIT License** 发布，许可证全文见 [LICENSE](LICENSE)（`pyproject.toml` 中亦声明为 MIT）。
